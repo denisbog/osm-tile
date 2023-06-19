@@ -100,11 +100,7 @@ fn build_index() -> (
         .flat_map(|item| item.nd.iter().map(|item| item.reference))
         .collect();
 
-    osm.node = osm
-        .node
-        .into_iter()
-        .filter(|item| items.contains(&item.id))
-        .collect();
+    osm.node.retain(|item| items.contains(&item.id));
 
     let writer = BufWriter::new(File::create("test-filter.bin").unwrap());
     ciborium::ser::into_writer(&osm, writer).unwrap();
@@ -118,7 +114,7 @@ fn build_index() -> (
         osm.node
             .iter()
             .fold(HashMap::<u64, (f64, f64)>::new(), |mut acc, item| {
-                acc.insert(item.id, convert_to_tile(item.lat, item.lon, 12));
+                acc.insert(item.id, convert_to_tile(item.lat, item.lon, ZOOM));
                 acc
             });
 
@@ -141,37 +137,13 @@ fn build_index() -> (
     (osm.way, mapped, ways_to_tiles)
 }
 
-fn render_tile_image(
-    ways_to_tiles: &HashMap<i32, HashMap<i32, HashSet<u64>>>,
-    mapped: &HashMap<u64, (f64, f64)>,
-    ways: &Vec<Way>,
-) {
-    let lat = 47.0245374;
-    let long = 28.8406618;
-    let tile = convert_to_tile(lat, long, 12);
-    let tile = convert_to_int_tile(tile.0, tile.1);
-
-    let ways_id_to_render = ways_to_tiles.get(&tile.0).unwrap().get(&tile.1).unwrap();
-
-    let filtered_ways = ways
-        .iter()
-        .filter(|way| ways_id_to_render.contains(&way.id))
-        .collect();
-
-    draw_to_image(
-        &mapped,
-        tile.0 as f64 * TILE_SIZE as f64,
-        tile.1 as f64 * TILE_SIZE as f64,
-        &filtered_ways,
-    );
-}
-
-async fn render_tile(
-    Path((x, y)): Path<(i32, i32)>,
-    Extension(ways_to_tiles): Extension<Arc<HashMap<i32, HashMap<i32, HashSet<u64>>>>>,
-    Extension(mapped): Extension<Arc<HashMap<u64, (f64, f64)>>>,
-    Extension(ways): Extension<Arc<Vec<Way>>>,
-) -> impl axum::response::IntoResponse {
+async fn render_tile_inner(
+    x: i32,
+    y: i32,
+    ways_to_tiles: Arc<HashMap<i32, HashMap<i32, HashSet<u64>>>>,
+    mapped: Arc<HashMap<u64, (f64, f64)>>,
+    ways: Arc<Vec<Way>>,
+) -> Vec<u8> {
     let filtered_ways = if let Some(inner) = ways_to_tiles.get(&x) {
         if let Some(inner) = inner.get(&y) {
             ways.iter().filter(|way| inner.contains(&way.id)).collect()
@@ -181,14 +153,24 @@ async fn render_tile(
     } else {
         Vec::new()
     };
+
+    draw_to_memory(
+        &mapped,
+        x as f64 * TILE_SIZE as f64,
+        y as f64 * TILE_SIZE as f64,
+        &filtered_ways,
+    )
+}
+
+async fn render_tile(
+    Path((x, y)): Path<(i32, i32)>,
+    Extension(ways_to_tiles): Extension<Arc<HashMap<i32, HashMap<i32, HashSet<u64>>>>>,
+    Extension(mapped): Extension<Arc<HashMap<u64, (f64, f64)>>>,
+    Extension(ways): Extension<Arc<Vec<Way>>>,
+) -> impl axum::response::IntoResponse {
     (
         axum::response::AppendHeaders([(header::CONTENT_TYPE, "image/png")]),
-        draw_to_memory(
-            &mapped,
-            x as f64 * TILE_SIZE as f64,
-            y as f64 * TILE_SIZE as f64,
-            &filtered_ways,
-        ),
+        render_tile_inner(x, y, ways_to_tiles, mapped, ways).await,
     )
 }
 fn convert_to_int_tile(lat: f64, lon: f64) -> (i32, i32) {
@@ -201,7 +183,7 @@ fn draw_to_memory(
     mapped_nodes: &HashMap<u64, (f64, f64)>,
     min_x: f64,
     min_y: f64,
-    way: &Vec<&Way>,
+    way: &[&Way],
 ) -> Vec<u8> {
     let surface =
         ImageSurface::create(cairo::Format::Rgb24, TILE_SIZE as i32, TILE_SIZE as i32).unwrap();
@@ -220,44 +202,13 @@ fn draw_to_memory(
             let x = point.0 - min_x;
             let y = point.1 - min_y;
 
-            // println!("draw line {} {}", x, y);
             context.line_to(x, y);
         });
-        // println!("done drawing line");
         context.stroke().unwrap();
     });
     let mut buffer = BufWriter::new(Vec::<u8>::new());
     surface.write_to_png(&mut buffer).unwrap();
-    buffer.buffer().to_vec()
-}
-
-fn draw_to_image(mapped_nodes: &HashMap<u64, (f64, f64)>, min_x: f64, min_y: f64, way: &Vec<&Way>) {
-    let surface =
-        ImageSurface::create(cairo::Format::Rgb24, TILE_SIZE as i32, TILE_SIZE as i32).unwrap();
-    let context = Context::new(&surface).unwrap();
-    context.set_source_rgb(0.2, 0.2, 0.2);
-    context.paint().unwrap();
-
-    context.set_line_width(1f64);
-    context.set_line_join(cairo::LineJoin::Round);
-    context.set_source_rgb(0.5, 0.5, 0.5);
-
-    way.iter().for_each(|way| {
-        way.nd.iter().for_each(|node| {
-            let point = mapped_nodes.get(&node.reference).unwrap();
-
-            let x = point.0 - min_x;
-            let y = point.1 - min_y;
-
-            // println!("draw line {} {}", x, y);
-            context.line_to(x, y);
-        });
-        // println!("done drawing line");
-        context.stroke().unwrap();
-    });
-
-    let mut file = File::create("image-tile.png").unwrap();
-    surface.write_to_png(&mut file).unwrap();
+    buffer.into_inner().unwrap()
 }
 
 fn filter(way: Vec<Way>, filter: &HashMap<String, HashSet<String>>) -> Vec<Way> {
@@ -293,7 +244,7 @@ async fn main() {
 }
 
 const TILE_SIZE: u32 = 256;
-
+const ZOOM: u8 = 14;
 fn convert_to_tile(lat: f64, lon: f64, zoom: u8) -> (f64, f64) {
     let (lat_rad, lon_rad) = (lat.to_radians(), lon.to_radians());
     let x = lon_rad + PI;
@@ -305,4 +256,32 @@ fn convert_to_tile(lat: f64, lon: f64, zoom: u8) -> (f64, f64) {
         factor * dimension_in_pixels
     };
     (rescale(x), rescale(y))
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        fs::File,
+        io::{BufWriter, Write},
+        sync::Arc,
+    };
+
+    use crate::{build_index, render_tile_inner};
+
+    #[tokio::test]
+    async fn name() {
+        let index = build_index();
+        let data = render_tile_inner(
+            297,
+            178,
+            Arc::new(index.2),
+            Arc::new(index.1),
+            Arc::new(index.0),
+        )
+        .await;
+
+        BufWriter::new(File::create("test-tile.png").unwrap())
+            .write(&data)
+            .unwrap();
+    }
 }
