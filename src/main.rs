@@ -1,7 +1,10 @@
 use axum::{extract::Path, http::header, routing::get, Extension, Router};
 use cairo::{Context, ImageSurface};
+use ciborium::from_reader;
+use env_logger::Env;
+use log::info;
 use osm_tiles::{
-    utils::{convert_to_int_tile, convert_to_tile, creat_filter, filter},
+    utils::{convert_to_int_tile, convert_to_tile},
     Osm, Way, TILE_SIZE,
 };
 use std::{
@@ -10,16 +13,16 @@ use std::{
     io::{BufReader, BufWriter},
     net::SocketAddr,
     sync::Arc,
+    time::Instant,
 };
 use tokio::sync::Mutex;
 
 type WayToTile = HashMap<i32, HashMap<i32, HashSet<u64>>>;
 type NodeToTile = HashMap<u64, (f64, f64)>;
 
-const OSM_PATH: &str = "moldova-latest.osm";
-
 fn build_index_for_zoom(osm: &Osm, zoom: u8) -> (WayToTile, NodeToTile) {
-    println!("build new cache for zoom {}", zoom);
+    let start = Instant::now();
+    info!("build new cache for zoom {}", zoom);
     let nodes_to_tile: NodeToTile =
         osm.node
             .iter()
@@ -59,24 +62,12 @@ fn build_index_for_zoom(osm: &Osm, zoom: u8) -> (WayToTile, NodeToTile) {
         },
     );
 
+    info!("index build in {:?} for zoom {}", start.elapsed(), zoom);
     (ways_to_tiles, nodes_to_tile)
 }
 
 fn filter_osm() -> Osm {
-    let buffer = BufReader::new(File::open(OSM_PATH).unwrap());
-    let mut osm: Osm = quick_xml::de::from_reader(buffer).unwrap();
-
-    osm.way = filter(osm.way, &creat_filter());
-
-    let nodes_relevant_to_filtered_ways: HashSet<u64> = osm
-        .way
-        .iter()
-        .flat_map(|item| item.nd.iter().map(|item| item.reference))
-        .collect();
-
-    osm.node
-        .retain(|item| nodes_relevant_to_filtered_ways.contains(&item.id));
-    osm
+    from_reader(BufReader::new(File::open("osm.bin").unwrap())).unwrap()
 }
 
 async fn render_tile_inner(
@@ -150,8 +141,10 @@ fn draw_to_memory(
     context.paint().unwrap();
 
     context.set_line_width(1f64);
+    context.set_line_cap(cairo::LineCap::Round);
     context.set_line_join(cairo::LineJoin::Round);
     context.set_source_rgb(0.5, 0.5, 0.5);
+    context.set_line_width(10f64);
 
     way.iter().for_each(|way| {
         way.nd.iter().for_each(|node| {
@@ -171,6 +164,7 @@ fn draw_to_memory(
 
 #[tokio::main]
 async fn main() {
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let app = Router::new()
         .route("/:z/:x/:y", get(render_tile))
         .layer(Extension(Arc::new(Mutex::new(
