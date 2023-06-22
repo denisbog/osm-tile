@@ -1,5 +1,7 @@
 pub mod utils;
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 pub const TILE_SIZE: u32 = 256;
@@ -36,7 +38,27 @@ pub struct Way {
 }
 
 #[derive(Deserialize, Serialize)]
+pub struct Member {
+    #[serde(rename = "@type")]
+    pub member_type: String,
+    #[serde(rename = "@ref")]
+    pub member_ref: u64,
+    #[serde(rename = "@role")]
+    pub role: String,
+    pub tag: Option<Vec<Tag>>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct Relation {
+    #[serde(rename = "@id")]
+    pub id: u64,
+    pub member: Vec<Member>,
+    pub tag: Option<Vec<Tag>>,
+}
+
+#[derive(Deserialize, Serialize)]
 pub struct Osm {
-    pub node: Vec<Node>,
-    pub way: Vec<Way>,
+    pub node: Vec<Arc<Node>>,
+    pub way: Vec<Arc<Way>>,
+    pub relation: Vec<Arc<Relation>>,
 }

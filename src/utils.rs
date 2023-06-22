@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     f64::consts::PI,
+    sync::Arc,
 };
 
 use crate::{Way, TILE_SIZE};
@@ -18,7 +19,7 @@ pub fn convert_to_int_tile(lat: f64, lon: f64) -> (i32, i32) {
     let tile_y = (lon / TILE_SIZE as f64) as i32;
     (tile_x, tile_y)
 }
-pub fn filter(way: Vec<Way>, filter: &HashMap<String, HashSet<String>>) -> Vec<Way> {
+pub fn filter(way: Vec<Arc<Way>>, filter: &HashMap<String, HashSet<String>>) -> Vec<Arc<Way>> {
     way.into_iter()
         .filter(|item| {
             if let Some(tag) = &item.tag {
