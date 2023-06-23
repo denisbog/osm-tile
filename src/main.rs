@@ -1,4 +1,9 @@
-use axum::{extract::Path, http::header, routing::get, Extension, Router};
+use axum::{
+    extract::Path,
+    http::{header, Method},
+    routing::get,
+    Extension, Router,
+};
 use cairo::{Context, ImageSurface};
 use ciborium::from_reader;
 use env_logger::Env;
@@ -12,10 +17,15 @@ use std::{
     fs::File,
     io::{BufReader, BufWriter},
     net::SocketAddr,
+    path::PathBuf,
     sync::Arc,
     time::Instant,
 };
 use tokio::sync::Mutex;
+use tower_http::{
+    cors::{Any, CorsLayer},
+    services::ServeDir,
+};
 
 type WayToTile = HashMap<i32, HashMap<i32, HashSet<u64>>>;
 type NodeToTile = HashMap<u64, (f64, f64)>;
@@ -165,17 +175,34 @@ impl TileCache {
     }
 }
 
-async fn render_tile(
+async fn render_tile_cache(
     Path((z, x, y)): Path<(i32, i32, i32)>,
     Extension(tile_cache): Extension<Arc<Mutex<TileCache>>>,
     Extension(osm): Extension<Arc<Osm>>,
 ) -> impl axum::response::IntoResponse {
-    let mut lock = tile_cache.lock().await;
-    let temp = lock.get_cache(z as u8);
-    (
-        axum::response::AppendHeaders([(header::CONTENT_TYPE, "image/png")]),
-        render_tile_inner(x, y, osm.clone(), temp).await,
-    )
+    let new_path = format!("./cached/{}/{}/{}.png", z, x, y);
+    let cached = PathBuf::from(&new_path);
+    if !cached.is_file() {
+        let mut lock = tile_cache.lock().await;
+        let temp = lock.get_cache(z as u8);
+        let rendered_image = render_tile_inner(x, y, osm.clone(), temp).await;
+        let last_index = new_path.rfind('/').unwrap();
+        tokio::fs::create_dir_all(&new_path[..last_index])
+            .await
+            .expect("failed to create the directory");
+        tokio::fs::write(&new_path, &rendered_image)
+            .await
+            .expect("storing rendition file");
+        (
+            axum::response::AppendHeaders([(header::CONTENT_TYPE, "image/png")]),
+            rendered_image,
+        )
+    } else {
+        (
+            axum::response::AppendHeaders([(header::CONTENT_TYPE, "image/png")]),
+            tokio::fs::read(&new_path).await.unwrap(),
+        )
+    }
 }
 
 fn draw_to_memory(
@@ -218,10 +245,16 @@ async fn main() {
 
     let osm = Arc::new(load_binary_osm());
 
+    let cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_headers(Any)
+        .allow_origin(Any);
+
     let app = Router::new()
-        .route("/:z/:x/:y", get(render_tile))
+        .route("/:z/:x/:y", get(render_tile_cache))
         .layer(Extension(Arc::new(Mutex::new(TileCache::new(osm.clone())))))
-        .layer(Extension(osm.clone()));
+        .layer(Extension(osm.clone()))
+        .layer(cors);
 
     axum::Server::bind(&SocketAddr::from(([0, 0, 0, 0], 4000)))
         .serve(app.into_make_service())

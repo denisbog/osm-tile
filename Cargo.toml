@@ -16,3 +16,4 @@ axum = "0.6.18"
 clap = "4.3.5"
 log = "0.4.19"
 env_logger = "0.10.0"
+tower-http = { version = "0.4.1", features = ["fs", "cors"] }
