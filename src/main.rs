@@ -69,6 +69,8 @@ fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
         })
         .collect();
 
+    let sorrund_tiles_window = [1, 0, 1, 1, -1, 0, -1, -1, 1];
+
     let way_to_tile = osm.way.iter().fold(
         HashMap::<i32, HashMap<i32, HashSet<u64>>>::new(),
         |mut acc, way| {
@@ -80,6 +82,16 @@ fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
                     .entry(tile.1)
                     .or_insert(HashSet::new())
                     .insert(way.id);
+                sorrund_tiles_window
+                    .windows(2)
+                    .into_iter()
+                    .for_each(|sliding_window| {
+                        acc.entry(tile.0 + sliding_window[0])
+                            .or_insert(HashMap::new())
+                            .entry(tile.1 + sliding_window[1])
+                            .or_insert(HashSet::new())
+                            .insert(way.id);
+                    })
             });
             acc
         },
@@ -236,6 +248,7 @@ fn draw_to_memory(
 
             context.line_to(x, y);
         });
+
         context.stroke().unwrap();
     });
     let mut buffer = BufWriter::new(Vec::<u8>::new());
@@ -249,22 +262,24 @@ async fn main() {
 
     let osm = Arc::new(load_binary_osm());
 
-    let filtered_relations = filter_relations(osm.clone(), &create_filter_expression());
-    let filtered_ways = filter_ways_from_relations(osm.clone(), &filtered_relations);
-
-    let nodes_to_filder: HashSet<u64> = filtered_ways
-        .iter()
-        .flat_map(|way| way.nd.iter().map(|nd| nd.reference))
-        .collect();
-
-    let mut filtered_nodes = osm.node.clone();
-    filtered_nodes.retain(|node| nodes_to_filder.contains(&node.id));
-
-    let filtered_osm = Arc::new(Osm {
-        way: filtered_ways,
-        node: filtered_nodes,
-        relation: filtered_relations,
-    });
+    // let filtered_relations = filter_relations(osm.clone(), &create_filter_expression());
+    // let filtered_ways = filter_ways_from_relations(osm.clone(), &filtered_relations);
+    //
+    // let nodes_to_filder: HashSet<u64> = filtered_ways
+    //     .iter()
+    //     .flat_map(|way| way.nd.iter().map(|nd| nd.reference))
+    //     .collect();
+    //
+    // let mut filtered_nodes = osm.node.clone();
+    // filtered_nodes.retain(|node| nodes_to_filder.contains(&node.id));
+    //
+    // let filtered_osm = Arc::new(Osm {
+    //     way: filtered_ways,
+    //     node: filtered_nodes,
+    //     relation: filtered_relations,
+    // });
+    //
+    let filtered_osm = osm.clone();
 
     let cors = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])

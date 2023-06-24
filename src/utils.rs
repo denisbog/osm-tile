@@ -66,14 +66,35 @@ pub fn filter_ways_from_relations(osm: Arc<Osm>, relations: &[Arc<Relation>]) ->
 
 pub fn create_filter_expression() -> HashMap<String, HashSet<String>> {
     let mut filters = HashMap::<String, HashSet<String>>::new();
+    // filters.insert(
+    //     "amenity".to_string(),
+    //     HashSet::from_iter(
+    //         vec!["fire_station"]
+    //             .iter()
+    //             .map(|item| item.to_string())
+    //             .collect::<Vec<String>>(),
+    //     ),
+    // );
+    //
+    // filters.insert(
+    //     "addr:housenumber".to_string(),
+    //     HashSet::from_iter(
+    //         vec!["17"]
+    //             .iter()
+    //             .map(|item| item.to_string())
+    //             .collect::<Vec<String>>(),
+    //     ),
+    // );
+
     filters.insert(
-        "amenity".to_string(),
+        "name".to_string(),
         HashSet::from_iter(
-            vec!["fire_station"]
+            vec!["Detaşamentul de Salvatori şi Pompieri Nr. 3"]
                 .iter()
                 .map(|item| item.to_string())
                 .collect::<Vec<String>>(),
         ),
     );
+
     filters
 }
