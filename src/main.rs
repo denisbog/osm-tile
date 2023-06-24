@@ -9,7 +9,10 @@ use ciborium::from_reader;
 use env_logger::Env;
 use log::info;
 use osm_tiles::{
-    utils::{convert_to_int_tile, convert_to_tile},
+    utils::{
+        convert_to_int_tile, convert_to_tile, create_filter_expression, filter_relations,
+        filter_ways_from_relations,
+    },
     Osm, Relation, Way, TILE_SIZE,
 };
 use std::{
@@ -182,7 +185,7 @@ async fn render_tile_cache(
 ) -> impl axum::response::IntoResponse {
     let new_path = format!("./cached/{}/{}/{}.png", z, x, y);
     let cached = PathBuf::from(&new_path);
-    if !cached.is_file() {
+    let response = if !cached.is_file() {
         let mut lock = tile_cache.lock().await;
         let temp = lock.get_cache(z as u8);
         let rendered_image = render_tile_inner(x, y, osm.clone(), temp).await;
@@ -193,16 +196,17 @@ async fn render_tile_cache(
         tokio::fs::write(&new_path, &rendered_image)
             .await
             .expect("storing rendition file");
-        (
-            axum::response::AppendHeaders([(header::CONTENT_TYPE, "image/png")]),
-            rendered_image,
-        )
+        rendered_image
     } else {
-        (
-            axum::response::AppendHeaders([(header::CONTENT_TYPE, "image/png")]),
-            tokio::fs::read(&new_path).await.unwrap(),
-        )
-    }
+        tokio::fs::read(&new_path).await.unwrap()
+    };
+    (
+        axum::response::AppendHeaders([
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "max-age=604800"),
+        ]),
+        response,
+    )
 }
 
 fn draw_to_memory(
@@ -245,15 +249,35 @@ async fn main() {
 
     let osm = Arc::new(load_binary_osm());
 
+    let filtered_relations = filter_relations(osm.clone(), &create_filter_expression());
+    let filtered_ways = filter_ways_from_relations(osm.clone(), &filtered_relations);
+
+    let nodes_to_filder: HashSet<u64> = filtered_ways
+        .iter()
+        .flat_map(|way| way.nd.iter().map(|nd| nd.reference))
+        .collect();
+
+    let mut filtered_nodes = osm.node.clone();
+    filtered_nodes.retain(|node| nodes_to_filder.contains(&node.id));
+
+    let filtered_osm = Arc::new(Osm {
+        way: filtered_ways,
+        node: filtered_nodes,
+        relation: filtered_relations,
+    });
+
     let cors = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(Any)
         .allow_origin(Any);
 
     let app = Router::new()
-        .route("/:z/:x/:y", get(render_tile_cache))
-        .layer(Extension(Arc::new(Mutex::new(TileCache::new(osm.clone())))))
-        .layer(Extension(osm.clone()))
+        .nest_service("/", ServeDir::new("../solid-leaflet-reprex/dist"))
+        .route("/map/:z/:x/:y", get(render_tile_cache))
+        .layer(Extension(Arc::new(Mutex::new(TileCache::new(
+            filtered_osm.clone(),
+        )))))
+        .layer(Extension(filtered_osm.clone()))
         .layer(cors);
 
     axum::Server::bind(&SocketAddr::from(([0, 0, 0, 0], 4000)))

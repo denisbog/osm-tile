@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{Way, TILE_SIZE};
+use crate::{Osm, Relation, Way, TILE_SIZE};
 
 pub fn convert_to_tile(lat: f64, lon: f64) -> (f64, f64) {
     let (lat_rad, lon_rad) = (lat.to_radians(), lon.to_radians());
@@ -19,10 +19,15 @@ pub fn convert_to_int_tile(lat: f64, lon: f64) -> (i32, i32) {
     let tile_y = (lon / TILE_SIZE as f64) as i32;
     (tile_x, tile_y)
 }
-pub fn filter(way: Vec<Arc<Way>>, filter: &HashMap<String, HashSet<String>>) -> Vec<Arc<Way>> {
-    way.into_iter()
-        .filter(|item| {
-            if let Some(tag) = &item.tag {
+pub fn filter_relations(
+    osm: Arc<Osm>,
+    filter: &HashMap<String, HashSet<String>>,
+) -> Vec<Arc<Relation>> {
+    osm.relation
+        .iter()
+        .cloned()
+        .filter(|relation| {
+            if let Some(tag) = &relation.tag {
                 tag.iter()
                     .filter(|item| {
                         filter.get(&item.k).is_some()
@@ -36,25 +41,38 @@ pub fn filter(way: Vec<Arc<Way>>, filter: &HashMap<String, HashSet<String>>) -> 
         })
         .collect()
 }
-pub fn creat_filter() -> HashMap<String, HashSet<String>> {
+
+pub fn filter_ways_from_relations(osm: Arc<Osm>, relations: &[Arc<Relation>]) -> Vec<Arc<Way>> {
+    let ways_to_filter: HashSet<u64> =
+        relations
+            .iter()
+            .fold(HashSet::<u64>::new(), |mut acc, relation| {
+                relation
+                    .member
+                    .iter()
+                    .filter(|member| member.member_type.eq("way"))
+                    .for_each(|way| {
+                        acc.insert(way.member_ref);
+                    });
+                acc
+            });
+
+    osm.way
+        .iter()
+        .cloned()
+        .filter(|way| ways_to_filter.contains(&way.id))
+        .collect()
+}
+
+pub fn create_filter_expression() -> HashMap<String, HashSet<String>> {
     let mut filters = HashMap::<String, HashSet<String>>::new();
     filters.insert(
-        "highway".to_string(),
+        "amenity".to_string(),
         HashSet::from_iter(
-            vec![
-                "primary",
-                "secondary",
-                "trunk",
-                "motorway",
-                "primary_link",
-                "tertiary",
-                "residential",
-                "service",
-                "unclassified",
-            ]
-            .iter()
-            .map(|item| item.to_string())
-            .collect::<Vec<String>>(),
+            vec!["fire_station"]
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<String>>(),
         ),
     );
     filters
