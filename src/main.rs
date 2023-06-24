@@ -69,7 +69,16 @@ fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
         })
         .collect();
 
-    let sorrund_tiles_window = [1, 0, 1, 1, -1, 0, -1, -1, 1];
+    let sorrund_tiles_window = [1, 1, 0, 1, -1, -1, 0, -1, 1];
+    let sorrund_tiles_window_x2 = [2, 2, 1, 2, 0, 2, -1, 2, -2, 1, -2, 0, -2, -1, -2, -2, 2];
+    let sorrund_tiles_window_x3 = [
+        3, 3, 2, 3, 1, 3, 0, 3, -1, 3, -2, 3, -3, -3, -2, -3, -1, -3, 0, -3, 1, -3, 2, -3, 3,
+    ];
+
+    let sorrund_tiles_window_x4 = [
+        4, 4, 3, 4, 2, 4, 1, 4, 0, 4, -1, 4, -2, 4, -3, 4, -4, -4, -3, -4, -2, -4, -1, -4, 0, -4,
+        1, -4, 2, -4, 3, -4, 4,
+    ];
 
     let way_to_tile = osm.way.iter().fold(
         HashMap::<i32, HashMap<i32, HashSet<u64>>>::new(),
@@ -82,16 +91,50 @@ fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
                     .entry(tile.1)
                     .or_insert(HashSet::new())
                     .insert(way.id);
-                sorrund_tiles_window
-                    .windows(2)
-                    .into_iter()
-                    .for_each(|sliding_window| {
-                        acc.entry(tile.0 + sliding_window[0])
-                            .or_insert(HashMap::new())
-                            .entry(tile.1 + sliding_window[1])
-                            .or_insert(HashSet::new())
-                            .insert(way.id);
-                    })
+                if zoom > 15 {
+                    sorrund_tiles_window
+                        .windows(2)
+                        .into_iter()
+                        .for_each(|sliding_window| {
+                            acc.entry(tile.0 + sliding_window[0])
+                                .or_insert(HashMap::new())
+                                .entry(tile.1 + sliding_window[1])
+                                .or_insert(HashSet::new())
+                                .insert(way.id);
+                        });
+                    if zoom > 16 {
+                        sorrund_tiles_window_x2
+                            .windows(2)
+                            .into_iter()
+                            .for_each(|sliding_window| {
+                                acc.entry(tile.0 + sliding_window[0])
+                                    .or_insert(HashMap::new())
+                                    .entry(tile.1 + sliding_window[1])
+                                    .or_insert(HashSet::new())
+                                    .insert(way.id);
+                            });
+                        if zoom > 17 {
+                            sorrund_tiles_window_x3.windows(2).into_iter().for_each(
+                                |sliding_window| {
+                                    acc.entry(tile.0 + sliding_window[0])
+                                        .or_insert(HashMap::new())
+                                        .entry(tile.1 + sliding_window[1])
+                                        .or_insert(HashSet::new())
+                                        .insert(way.id);
+                                },
+                            );
+                            sorrund_tiles_window_x4.windows(2).into_iter().for_each(
+                                |sliding_window| {
+                                    acc.entry(tile.0 + sliding_window[0])
+                                        .or_insert(HashMap::new())
+                                        .entry(tile.1 + sliding_window[1])
+                                        .or_insert(HashSet::new())
+                                        .insert(way.id);
+                                },
+                            );
+                        };
+                    }
+                }
             });
             acc
         },
@@ -311,6 +354,8 @@ mod test {
 
     // use crate::{build_index_for_zoom, filter_osm, render_tile_inner};
 
+    use serde::de::IntoDeserializer;
+
     #[tokio::test]
     async fn name() {
         // let osm = filter_osm();
@@ -327,5 +372,13 @@ mod test {
         // BufWriter::new(File::create("test-tile.png").unwrap())
         //     .write(&data)
         //     .unwrap();
+    }
+    #[test]
+    fn check() {
+        let init = [1, 0, -1];
+
+        init.iter()
+            .enumerate()
+            .flat_map(|(index, item)| init.iter().skip(index));
     }
 }
