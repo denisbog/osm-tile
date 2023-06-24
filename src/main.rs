@@ -9,11 +9,8 @@ use ciborium::from_reader;
 use env_logger::Env;
 use log::info;
 use osm_tiles::{
-    utils::{
-        convert_to_int_tile, convert_to_tile, create_filter_expression, filter_relations,
-        filter_ways_from_relations,
-    },
-    Osm, Relation, Way, TILE_SIZE,
+    utils::{convert_to_int_tile, convert_to_tile},
+    Osm, Way, TILE_SIZE,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -32,16 +29,10 @@ use tower_http::{
 
 type WayToTile = HashMap<i32, HashMap<i32, HashSet<u64>>>;
 type NodeToTile = HashMap<u64, (f64, f64)>;
-type IdToRelation = HashMap<u64, Arc<Relation>>;
-type IdToWay = HashMap<u64, Arc<Way>>;
-type RelationToTile = HashMap<i32, HashMap<i32, HashSet<u64>>>;
 
 struct Index {
     way_to_tile: WayToTile,
     node_to_tile: NodeToTile,
-    relation_to_tile: RelationToTile,
-    id_to_relation: IdToRelation,
-    id_to_way: IdToWay,
 }
 fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
     let start = Instant::now();
@@ -92,20 +83,16 @@ fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
                     .or_insert(HashSet::new())
                     .insert(way.id);
                 if zoom > 15 {
-                    sorrund_tiles_window
-                        .windows(2)
-                        .into_iter()
-                        .for_each(|sliding_window| {
-                            acc.entry(tile.0 + sliding_window[0])
-                                .or_insert(HashMap::new())
-                                .entry(tile.1 + sliding_window[1])
-                                .or_insert(HashSet::new())
-                                .insert(way.id);
-                        });
+                    sorrund_tiles_window.windows(2).for_each(|sliding_window| {
+                        acc.entry(tile.0 + sliding_window[0])
+                            .or_insert(HashMap::new())
+                            .entry(tile.1 + sliding_window[1])
+                            .or_insert(HashSet::new())
+                            .insert(way.id);
+                    });
                     if zoom > 16 {
                         sorrund_tiles_window_x2
                             .windows(2)
-                            .into_iter()
                             .for_each(|sliding_window| {
                                 acc.entry(tile.0 + sliding_window[0])
                                     .or_insert(HashMap::new())
@@ -114,61 +101,26 @@ fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
                                     .insert(way.id);
                             });
                         if zoom > 17 {
-                            sorrund_tiles_window_x3.windows(2).into_iter().for_each(
-                                |sliding_window| {
+                            sorrund_tiles_window_x3
+                                .windows(2)
+                                .for_each(|sliding_window| {
                                     acc.entry(tile.0 + sliding_window[0])
                                         .or_insert(HashMap::new())
                                         .entry(tile.1 + sliding_window[1])
                                         .or_insert(HashSet::new())
                                         .insert(way.id);
-                                },
-                            );
-                            sorrund_tiles_window_x4.windows(2).into_iter().for_each(
-                                |sliding_window| {
+                                });
+                            sorrund_tiles_window_x4
+                                .windows(2)
+                                .for_each(|sliding_window| {
                                     acc.entry(tile.0 + sliding_window[0])
                                         .or_insert(HashMap::new())
                                         .entry(tile.1 + sliding_window[1])
                                         .or_insert(HashSet::new())
                                         .insert(way.id);
-                                },
-                            );
+                                });
                         };
                     }
-                }
-            });
-            acc
-        },
-    );
-
-    let id_to_way = osm
-        .way
-        .iter()
-        .fold(HashMap::<u64, Arc<Way>>::new(), |mut acc, item| {
-            acc.insert(item.id, item.clone());
-            acc
-        });
-    let id_to_relation =
-        osm.relation
-            .iter()
-            .fold(HashMap::<u64, Arc<Relation>>::new(), |mut acc, relation| {
-                acc.insert(relation.id, relation.clone());
-                acc
-            });
-
-    let relation_to_tile = osm.relation.iter().fold(
-        HashMap::<i32, HashMap<i32, HashSet<u64>>>::new(),
-        |mut acc, relation| {
-            relation.member.iter().for_each(|member| {
-                if let Some(way) = id_to_way.get(&member.member_ref) {
-                    way.nd.iter().for_each(|node| {
-                        let tile = node_to_tile.get(&node.reference).unwrap();
-                        let tile = convert_to_int_tile(tile.0, tile.1);
-                        acc.entry(tile.0)
-                            .or_insert(HashMap::new())
-                            .entry(tile.1)
-                            .or_insert(HashSet::new())
-                            .insert(relation.id);
-                    });
                 }
             });
             acc
@@ -179,9 +131,6 @@ fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
     Index {
         way_to_tile,
         node_to_tile,
-        relation_to_tile,
-        id_to_relation,
-        id_to_way,
     }
 }
 
@@ -268,7 +217,7 @@ fn draw_to_memory(
     mapped_nodes: &HashMap<u64, (f64, f64)>,
     min_x: f64,
     min_y: f64,
-    way: &Vec<Arc<Way>>,
+    way: &[Arc<Way>],
 ) -> Vec<u8> {
     let surface =
         ImageSurface::create(cairo::Format::Rgb24, TILE_SIZE as i32, TILE_SIZE as i32).unwrap();
