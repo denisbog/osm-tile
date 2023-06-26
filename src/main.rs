@@ -27,14 +27,17 @@ use tower_http::{
     services::ServeDir,
 };
 
+type RelationToTile = HashMap<i32, HashMap<i32, HashSet<u64>>>;
 type WayToTile = HashMap<i32, HashMap<i32, HashSet<u64>>>;
 type NodeToTile = HashMap<u64, (f64, f64)>;
 type WayToRelation = HashMap<u64, Arc<Relation>>;
 
 struct Index {
+    relations_to_tile: RelationToTile,
     ways_to_tile: WayToTile,
     node_to_tile_zoom_coordinates: NodeToTile,
     way_to_relation: WayToRelation,
+    id_to_ways: HashMap<u64, Arc<Way>>,
 }
 fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
     let start = Instant::now();
@@ -64,7 +67,62 @@ fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
 
     let sorrund_tiles_window = [1, 1, 0, 1, -1, -1, 0, -1, 1];
 
-    let ways_to_tile = osm.way.iter().fold(
+    let id_to_ways = osm
+        .way
+        .iter()
+        .fold(HashMap::<u64, Arc<Way>>::new(), |mut acc, way| {
+            acc.insert(way.id, way.clone());
+            acc
+        });
+
+    let relations_to_tile = osm.relation.iter().fold(
+        HashMap::<i32, HashMap<i32, HashSet<u64>>>::new(),
+        |mut acc, relation| {
+            relation
+                .member
+                .iter()
+                .flat_map(|member| id_to_ways.get(&member.member_ref))
+                .flat_map(|way| way.nd.iter())
+                .for_each(|node| {
+                    let tile = node_to_tile_zoom_coordinates.get(&node.reference).unwrap();
+                    let tile = convert_to_int_tile(tile.0, tile.1);
+                    acc.entry(tile.0)
+                        .or_insert(HashMap::new())
+                        .entry(tile.1)
+                        .or_insert(HashSet::new())
+                        .insert(relation.id);
+                    if zoom > 15 {
+                        sorrund_tiles_window.windows(2).for_each(|sliding_window| {
+                            acc.entry(tile.0 + sliding_window[0])
+                                .or_insert(HashMap::new())
+                                .entry(tile.1 + sliding_window[1])
+                                .or_insert(HashSet::new())
+                                .insert(relation.id);
+                        })
+                    }
+                });
+            acc
+        },
+    );
+
+    let ways_from_relations =
+        osm.relation
+            .iter()
+            .fold(HashSet::<u64>::new(), |mut acc, relation| {
+                relation.member.iter().for_each(|member| {
+                    acc.insert(member.member_ref);
+                });
+                acc
+            });
+
+    let ways_not_part_of_relation: Vec<Arc<Way>> = osm
+        .way
+        .iter()
+        .cloned()
+        .filter(|way| !ways_from_relations.contains(&way.id))
+        .collect();
+
+    let ways_to_tile = ways_not_part_of_relation.iter().fold(
         HashMap::<i32, HashMap<i32, HashSet<u64>>>::new(),
         |mut acc, way| {
             way.nd.iter().for_each(|node| {
@@ -101,9 +159,11 @@ fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
 
     info!("index build in {:?} for zoom {}", start.elapsed(), zoom);
     Index {
+        relations_to_tile,
         ways_to_tile,
         node_to_tile_zoom_coordinates,
         way_to_relation,
+        id_to_ways,
     }
 }
 
@@ -112,12 +172,26 @@ fn load_binary_osm() -> Osm {
 }
 
 async fn render_tile_inner(z: i32, x: i32, y: i32, osm: Arc<Osm>, index: &Index) -> Vec<u8> {
-    let filtered_ways = if let Some(inner) = index.ways_to_tile.get(&x) {
+    let filtered_relations = if let Some(inner) = index.relations_to_tile.get(&x) {
         if let Some(inner) = inner.get(&y) {
-            osm.way
+            osm.relation
                 .iter()
                 .cloned()
-                .filter(|way| inner.contains(&way.id))
+                .filter(|relation| inner.contains(&relation.id))
+                .collect()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    let filtered_ways = if let Some(inner) = index.ways_to_tile.get(&x) {
+        if let Some(inner) = inner.get(&y) {
+            inner
+                .iter()
+                .flat_map(|inner| index.id_to_ways.get(&inner))
+                .cloned()
                 .collect()
         } else {
             Vec::new()
@@ -131,7 +205,9 @@ async fn render_tile_inner(z: i32, x: i32, y: i32, osm: Arc<Osm>, index: &Index)
         &index.node_to_tile_zoom_coordinates,
         x as f64 * TILE_SIZE as f64,
         y as f64 * TILE_SIZE as f64,
+        &filtered_relations,
         &filtered_ways,
+        &index.id_to_ways,
         &index.way_to_relation,
     )
 }
@@ -189,6 +265,15 @@ async fn render_tile_cache(
         response,
     )
 }
+
+fn check_if_relation_is_park(relation: &Relation) -> bool {
+    if let Some(tag) = &relation.tag {
+        if let Some(tag) = tag.iter().find(|t| t.k.eq("leisure")) {
+            return tag.v.eq("park");
+        }
+    }
+    false
+}
 fn check_if_park(way: &Way, way_to_relation: &WayToRelation) -> bool {
     if let Some(tag) = &way.tag {
         if let Some(tag) = tag.iter().find(|t| t.k.eq("leisure")) {
@@ -211,7 +296,9 @@ fn draw_to_memory(
     mapped_nodes: &HashMap<u64, (f64, f64)>,
     min_x: f64,
     min_y: f64,
+    relations: &[Arc<Relation>],
     ways: &[Arc<Way>],
+    id_to_ways: &HashMap<u64, Arc<Way>>,
     way_to_relation: &WayToRelation,
 ) -> Vec<u8> {
     let surface =
@@ -228,7 +315,7 @@ fn draw_to_memory(
     context.set_line_width(1f64);
 
     ways.iter().for_each(|way| {
-        let is_park = check_if_park(&way, way_to_relation);
+        let is_park = check_if_park(way, way_to_relation);
 
         if is_park {
             context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
@@ -251,17 +338,77 @@ fn draw_to_memory(
         context.stroke().unwrap();
     });
 
-    if z > 16 {
-        ways.iter().for_each(|way| {
-            way.nd.iter().for_each(|node| {
-                let point = mapped_nodes.get(&node.reference).unwrap();
-                let x = point.0 - min_x;
-                let y = point.1 - min_y;
-                context.rectangle(x - 1f64, y - 1f64, 3 as f64, 3 as f64);
-            });
-        });
-        context.stroke().unwrap();
-    }
+    relations.iter().for_each(|relation| {
+        if check_if_relation_is_park(relation) {
+            context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
+            relation
+                .member
+                .iter()
+                .flat_map(|member| id_to_ways.get(&member.member_ref))
+                .for_each(|way| {
+                    way.nd.iter().rev().for_each(|node| {
+                        let point = mapped_nodes.get(&node.reference).unwrap();
+
+                        let x = point.0 - min_x;
+                        let y = point.1 - min_y;
+
+                        context.line_to(x, y);
+                    });
+                });
+            context.fill().unwrap();
+            context.stroke().unwrap();
+
+            context.set_source_rgb(0.5, 1.0, 0.5);
+            relation
+                .member
+                .iter()
+                .flat_map(|member| id_to_ways.get(&member.member_ref))
+                .enumerate()
+                .for_each(|(index, way)| {
+                    way.nd.iter().enumerate().for_each(|(index_y, node)| {
+                        let point = mapped_nodes.get(&node.reference).unwrap();
+                        let x = point.0 - min_x;
+                        let y = point.1 - min_y;
+                        context.rectangle(x - 1f64, y - 1f64, 3f64, 3f64);
+
+                        context.move_to(x, y);
+                        context
+                            .show_text(&format!("{}-{}", index, index_y))
+                            .unwrap();
+                    });
+                });
+            context.stroke().unwrap();
+        } else {
+            context.set_source_rgb(0.5, 0.5, 0.5);
+            relation
+                .member
+                .iter()
+                .flat_map(|member| id_to_ways.get(&member.member_ref))
+                .for_each(|way| {
+                    way.nd.iter().for_each(|node| {
+                        let point = mapped_nodes.get(&node.reference).unwrap();
+
+                        let x = point.0 - min_x;
+                        let y = point.1 - min_y;
+
+                        context.line_to(x, y);
+                    });
+                    context.stroke().unwrap();
+                });
+        }
+    });
+
+    // if z > 16 {
+    //     ways.iter().for_each(|way| {
+    //         way.nd.iter().for_each(|node| {
+    //             let point = mapped_nodes.get(&node.reference).unwrap();
+    //             let x = point.0 - min_x;
+    //             let y = point.1 - min_y;
+    //             context.rectangle(x - 1f64, y - 1f64, 3f64, 3f64);
+    //         });
+    //     });
+    //     context.stroke().unwrap();
+    // }
 
     context.set_source_rgb(0.7, 0.7, 0.7);
     context.line_to(TILE_SIZE as f64, 0 as f64);
