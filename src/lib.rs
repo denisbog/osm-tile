@@ -1,10 +1,17 @@
 pub mod utils;
 
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use serde::{Deserialize, Serialize};
 
 pub const TILE_SIZE: u32 = 256;
+
+pub type RelationToTile = HashMap<i32, HashMap<i32, HashSet<u64>>>;
+pub type WayToTile = HashMap<i32, HashMap<i32, HashSet<u64>>>;
+pub type NodeToTile = HashMap<u64, (f64, f64)>;
 
 #[derive(Deserialize, Serialize)]
 pub struct Node {
@@ -14,6 +21,7 @@ pub struct Node {
     pub lat: f64,
     #[serde(rename = "@lon")]
     pub lon: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<Vec<Tag>>,
 }
 
@@ -34,6 +42,7 @@ pub struct Way {
     #[serde(rename = "@id")]
     pub id: u64,
     pub nd: Vec<Nd>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<Vec<Tag>>,
 }
 
@@ -45,6 +54,7 @@ pub struct Member {
     pub member_ref: u64,
     #[serde(rename = "@role")]
     pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<Vec<Tag>>,
 }
 
@@ -53,12 +63,13 @@ pub struct Relation {
     #[serde(rename = "@id")]
     pub id: u64,
     pub member: Vec<Member>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<Vec<Tag>>,
 }
 
 #[derive(Deserialize, Serialize)]
 pub struct Osm {
-    pub node: Vec<Arc<Node>>,
-    pub way: Vec<Arc<Way>>,
     pub relation: Vec<Arc<Relation>>,
+    pub way: Vec<Arc<Way>>,
+    pub node: Vec<Arc<Node>>,
 }

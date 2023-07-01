@@ -20,7 +20,7 @@ pub fn convert_to_int_tile(lat: f64, lon: f64) -> (i32, i32) {
     (tile_x, tile_y)
 }
 pub fn filter_relations(
-    osm: Arc<Osm>,
+    osm: &Osm,
     filter: &HashMap<String, HashSet<String>>,
 ) -> Vec<Arc<Relation>> {
     osm.relation
@@ -34,7 +34,7 @@ pub fn filter_relations(
                             && filter.get(&item.k).unwrap().contains(&item.v)
                     })
                     .count()
-                    > 0usize
+                    .eq(&filter.len())
             } else {
                 false
             }
@@ -42,7 +42,7 @@ pub fn filter_relations(
         .collect()
 }
 
-pub fn filter_ways_from_relations(osm: Arc<Osm>, relations: &[Arc<Relation>]) -> Vec<Arc<Way>> {
+pub fn filter_ways_from_relations(osm: &Osm, relations: &[Arc<Relation>]) -> Vec<Arc<Way>> {
     let ways_to_filter: HashSet<u64> =
         relations
             .iter()
@@ -66,35 +66,14 @@ pub fn filter_ways_from_relations(osm: Arc<Osm>, relations: &[Arc<Relation>]) ->
 
 pub fn create_filter_expression() -> HashMap<String, HashSet<String>> {
     let mut filters = HashMap::<String, HashSet<String>>::new();
-    // filters.insert(
-    //     "amenity".to_string(),
-    //     HashSet::from_iter(
-    //         vec!["fire_station"]
-    //             .iter()
-    //             .map(|item| item.to_string())
-    //             .collect::<Vec<String>>(),
-    //     ),
-    // );
-    //
-    // filters.insert(
-    //     "addr:housenumber".to_string(),
-    //     HashSet::from_iter(
-    //         vec!["17"]
-    //             .iter()
-    //             .map(|item| item.to_string())
-    //             .collect::<Vec<String>>(),
-    //     ),
-    // );
-
     filters.insert(
-        "name".to_string(),
+        "leisure".to_string(),
         HashSet::from_iter(
-            vec!["Detaşamentul de Salvatori şi Pompieri Nr. 3"]
+            vec!["park"]
                 .iter()
                 .map(|item| item.to_string())
                 .collect::<Vec<String>>(),
         ),
     );
-
     filters
 }
