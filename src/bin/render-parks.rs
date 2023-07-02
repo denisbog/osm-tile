@@ -9,7 +9,10 @@ use std::{
 use cairo::{Context, ImageSurface};
 use env_logger::Env;
 use log::info;
-use osm_tiles::{utils::convert_to_tile, NodeToTile, Osm, Way, TILE_SIZE};
+use osm_tiles::{
+    utils::{convert_to_tile, extract_loops_to_render},
+    NodeToTile, Osm, Relation, Way, TILE_SIZE,
+};
 
 const PADDING: f64 = 100f64;
 
@@ -20,8 +23,6 @@ async fn main() {
     let zoom = 16;
     let osm: Osm =
         quick_xml::de::from_reader(BufReader::new(File::open("temp.xml").unwrap())).unwrap();
-
-    let mut last: Option<u64> = None;
 
     let nodes_to_tile: NodeToTile =
         osm.node
@@ -108,68 +109,45 @@ async fn main() {
     context.set_source_rgb(0.5, 0.5, 0.5);
     context.set_line_width(1f64);
 
+    info!("init nodes to order");
     osm.relation.iter().for_each(|relation| {
-        context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
-        let ways: Vec<&Arc<Way>> = relation
+        relation
             .member
             .iter()
-            .flat_map(|member| id_to_ways.get(&member.member_ref))
-            .collect();
-
-        let mut init = Vec::<u64>::new();
-
-        let a = ways.first().unwrap();
-        let b = ways.get(0).unwrap();
-
-        if a.nd
-            .last()
-            .unwrap()
-            .reference
-            .eq(&b.nd.first().unwrap().reference)
-        {
-            init.extend(a.nd.iter().map(|nd| nd.reference));
-        } else {
-            init.extend(a.nd.iter().rev().map(|nd| nd.reference));
-        }
-
-        let ordered_nodes = ways.windows(2).fold(init, |mut acc, b| {
-            let a = b[0];
-            let b = b[1];
-            if a.nd
-                .last()
-                .unwrap()
-                .reference
-                .eq(&b.nd.first().unwrap().reference)
-            {
-                acc.extend(b.nd.iter().map(|nd| nd.reference));
-            } else {
-                acc.extend(b.nd.iter().rev().map(|nd| nd.reference));
-            }
-            acc
-        });
-
-        ordered_nodes.iter().for_each(|node| {
-            println!("node {}", node);
-        });
-
-        ordered_nodes
-            .iter()
-            .flat_map(|node| mapped_nodes.get(node))
-            .map(|(x, y)| {
-                let x = x - min_x;
-                let y = y - min_y;
-                (x, y)
+            .map(|relation| relation.member_ref)
+            .flat_map(|relation| id_to_ways.get(&relation))
+            .for_each(|way| {
+                way.nd
+                    .iter()
+                    .for_each(|node| info!("node {}-{}", way.id, node.reference));
             })
-            .for_each(|(x, y)| {
-                context.line_to(x, y);
-            });
+    });
 
-        context.fill().unwrap();
-        context.stroke().unwrap();
+    context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
 
-        context.set_source_rgb(0.5, 1.0, 0.5);
+    osm.relation.iter().for_each(|relation| {
+        let loops = extract_loops_to_render(relation.as_ref(), &id_to_ways);
+
+        loops.iter().for_each(|ordered_nodes| {
+            ordered_nodes
+                .iter()
+                .flat_map(|node| mapped_nodes.get(node))
+                .map(|(x, y)| {
+                    let x = x - min_x;
+                    let y = y - min_y;
+                    (x, y)
+                })
+                .for_each(|(x, y)| {
+                    context.line_to(x, y);
+                });
+
+            context.fill().unwrap();
+            context.stroke().unwrap();
+        });
+
         context.stroke().unwrap();
     });
+
     context.set_source_rgb(0.7, 0.7, 0.7);
     context.line_to(width, 0 as f64);
     context.line_to(0 as f64, 0 as f64);

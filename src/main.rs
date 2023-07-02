@@ -9,10 +9,7 @@ use ciborium::from_reader;
 use env_logger::Env;
 use log::info;
 use osm_tiles::{
-    utils::{
-        convert_to_int_tile, convert_to_tile, create_filter_expression, filter_relations,
-        filter_ways_from_relations,
-    },
+    utils::{convert_to_int_tile, convert_to_tile, extract_loops_to_render},
     NodeToTile, Osm, Relation, RelationToTile, Way, WayToTile, TILE_SIZE,
 };
 use std::{
@@ -288,47 +285,24 @@ fn draw_to_memory(
     context.set_source_rgb(0.5, 0.5, 0.5);
     context.set_line_width(1f64);
 
-    let mut last: Option<u64> = None;
-
     ways.iter().for_each(|way| {
         let is_park = check_if_park(way);
-
         if is_park {
             context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
         } else {
             context.set_source_rgb(0.5, 0.5, 0.5);
         }
-        let reverse = if let Some(last_item) = last {
-            if last_item.eq(&way.nd.last().unwrap().reference) {
-                false
-            } else {
-                true
-            }
-        } else {
-            false
-        };
-        if reverse {
-            way.nd.iter().for_each(|node| {
-                let point = mapped_nodes.get(&node.reference).unwrap();
-
-                let x = point.0 - min_x;
-                let y = point.1 - min_y;
-
+        way.nd
+            .iter()
+            .flat_map(|nd| mapped_nodes.get(&nd.reference))
+            .map(|(x, y)| {
+                let x = x - min_x;
+                let y = y - min_y;
+                (x, y)
+            })
+            .for_each(|(x, y)| {
                 context.line_to(x, y);
             });
-            last = Some(way.nd.last().unwrap().reference);
-        } else {
-            way.nd.iter().for_each(|node| {
-                let point = mapped_nodes.get(&node.reference).unwrap();
-
-                let x = point.0 - min_x;
-                let y = point.1 - min_y;
-
-                context.line_to(x, y);
-            });
-            last = Some(way.nd.first().unwrap().reference);
-        };
-
         if is_park {
             context.fill().unwrap();
         }
@@ -336,118 +310,48 @@ fn draw_to_memory(
     });
 
     relations.iter().for_each(|relation| {
-        if check_if_relation_is_park(relation) {
+        let is_park = check_if_relation_is_park(relation);
+
+        if is_park {
             context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
-            let ways: Vec<&Arc<Way>> = relation
-                .member
-                .iter()
-                .flat_map(|member| id_to_ways.get(&member.member_ref))
-                .collect();
-
-            ways.iter().fold(HashSet::<u64>::new(), |mut acc, way| {
-                let reverse = if let Some(last_item) = last {
-                    if last_item.eq(&way.nd.last().unwrap().reference) {
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                info!("is reverse : {}", reverse);
-                info!("last {:?} ", last);
-                if reverse {
-                    way.nd.iter().for_each(|node| {
-                        let point = mapped_nodes.get(&node.reference).unwrap();
-
-                        let x = point.0 - min_x;
-                        let y = point.1 - min_y;
-
-                        context.line_to(x, y);
-                    });
-                    last = Some(way.nd.last().unwrap().reference);
-                    info!("now {:?} ", last);
-                } else {
-                    way.nd.iter().for_each(|node| {
-                        let point = mapped_nodes.get(&node.reference).unwrap();
-
-                        let x = point.0 - min_x;
-                        let y = point.1 - min_y;
-
-                        context.line_to(x, y);
-                    });
-                    last = Some(way.nd.first().unwrap().reference);
-                };
-
-                info!("now {:?} ", last);
-
-                if acc.contains(&last.unwrap()) {
-                    info!("contains last");
-                    context.fill().unwrap();
-                    context.stroke().unwrap();
-                    acc.clear();
-                    last = None;
-                } else {
-                    acc.insert(last.unwrap());
-                }
-
-                acc
-            });
-            context.fill().unwrap();
-            context.stroke().unwrap();
-
-            context.set_source_rgb(0.5, 1.0, 0.5);
-            let ways: Vec<&Arc<Way>> = relation
-                .member
-                .iter()
-                .flat_map(|member| id_to_ways.get(&member.member_ref))
-                .collect();
-
-            ways.iter().enumerate().for_each(|(index, way)| {
-                way.nd.iter().enumerate().for_each(|(index_y, node)| {
-                    let point = mapped_nodes.get(&node.reference).unwrap();
-                    let x = point.0 - min_x;
-                    let y = point.1 - min_y;
-                    context.rectangle(x - 1f64, y - 1f64, 3f64, 3f64);
-
-                    context.move_to(x, y);
-                    context
-                        .show_text(&format!("{}-{}", index, index_y))
-                        .unwrap();
-                });
-            });
-            context.stroke().unwrap();
         } else {
             context.set_source_rgb(0.5, 0.5, 0.5);
-            relation
-                .member
-                .iter()
-                .flat_map(|member| id_to_ways.get(&member.member_ref))
-                .for_each(|way| {
-                    way.nd.iter().for_each(|node| {
-                        let point = mapped_nodes.get(&node.reference).unwrap();
-
-                        let x = point.0 - min_x;
-                        let y = point.1 - min_y;
-
-                        context.line_to(x, y);
-                    });
-                    context.stroke().unwrap();
-                });
         }
+
+        let loops = extract_loops_to_render(relation.as_ref(), &id_to_ways);
+        loops.iter().for_each(|ordered_nodes| {
+            ordered_nodes
+                .iter()
+                .flat_map(|node| mapped_nodes.get(node))
+                .map(|(x, y)| {
+                    let x = x - min_x;
+                    let y = y - min_y;
+                    (x, y)
+                })
+                .for_each(|(x, y)| {
+                    context.line_to(x, y);
+                });
+
+            if is_park {
+                context.fill().unwrap();
+            }
+            context.stroke().unwrap();
+        });
+
+        context.stroke().unwrap();
     });
 
-    // if z > 16 {
-    //     ways.iter().for_each(|way| {
-    //         way.nd.iter().for_each(|node| {
-    //             let point = mapped_nodes.get(&node.reference).unwrap();
-    //             let x = point.0 - min_x;
-    //             let y = point.1 - min_y;
-    //             context.rectangle(x - 1f64, y - 1f64, 3f64, 3f64);
-    //         });
-    //     });
-    //     context.stroke().unwrap();
-    // }
+    if z > 16 {
+        ways.iter().for_each(|way| {
+            way.nd.iter().for_each(|node| {
+                let point = mapped_nodes.get(&node.reference).unwrap();
+                let x = point.0 - min_x;
+                let y = point.1 - min_y;
+                context.rectangle(x - 1f64, y - 1f64, 3f64, 3f64);
+            });
+        });
+        context.stroke().unwrap();
+    }
 
     context.set_source_rgb(0.7, 0.7, 0.7);
     context.line_to(TILE_SIZE as f64, 0 as f64);
@@ -464,40 +368,45 @@ fn draw_to_memory(
 async fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
+    // let buffer = BufReader::new(File::open("temp.xml").unwrap());
+    // let osm: Osm = quick_xml::de::from_reader(buffer).unwrap();
+
     let osm = Arc::new(load_binary_osm());
 
-    let filtered_relations = filter_relations(osm.as_ref(), &create_filter_expression());
-    let filtered_ways = filter_ways_from_relations(osm.as_ref(), &filtered_relations);
+    // let filtered_relations = filter_relations(&osm, &create_filter_expression());
+    // let filtered_ways = filter_ways_from_relations(&osm, &filtered_relations);
+    //
+    // let nodes_to_filder: HashSet<u64> = filtered_ways
+    //     .iter()
+    //     .flat_map(|way| way.nd.iter())
+    //     .map(|nd| nd.reference)
+    //     .collect();
+    //
+    // let mut filtered_nodes = osm.node.clone();
+    // filtered_nodes.retain(|node| nodes_to_filder.contains(&node.id));
+    //
+    // let nodes_to_filder: HashSet<u64> = filtered_ways
+    //     .iter()
+    //     .flat_map(|way| way.nd.iter().map(|nd| nd.reference))
+    //     .collect();
+    //
+    // let mut filtered_nodes = osm.node.clone();
+    // filtered_nodes.retain(|node| nodes_to_filder.contains(&node.id));
 
-    let nodes_to_filder: HashSet<u64> = filtered_ways
-        .iter()
-        .flat_map(|way| way.nd.iter())
-        .map(|nd| nd.reference)
-        .collect();
-
-    let mut filtered_nodes = osm.node.clone();
-    filtered_nodes.retain(|node| nodes_to_filder.contains(&node.id));
-
-    let nodes_to_filder: HashSet<u64> = filtered_ways
-        .iter()
-        .flat_map(|way| way.nd.iter().map(|nd| nd.reference))
-        .collect();
-
-    let mut filtered_nodes = osm.node.clone();
-    filtered_nodes.retain(|node| nodes_to_filder.contains(&node.id));
-
-    let filtered_osm = Arc::new(Osm {
-        way: filtered_ways,
-        node: filtered_nodes,
-        relation: filtered_relations,
-    });
+    // let filtered_osm = Arc::new(Osm {
+    //     way: filtered_ways,
+    //     node: filtered_nodes,
+    //     relation: filtered_relations,
+    // });
 
     // let mut string = String::new();
     // to_writer(&mut string, &filtered_osm).unwrap();
     // let mut buf_writer = BufWriter::new(File::create("temp.xml").unwrap());
     // buf_writer.write_all(string.as_bytes()).unwrap();
 
-    // let filtered_osm = osm.clone();
+    let filtered_osm = osm.clone();
+    //
+    // let filtered_osm = Arc::new(osm);
 
     let cors = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])

@@ -68,15 +68,24 @@ pub fn create_filter_expression_to_filter_parks() -> HashMap<String, HashSet<Str
         ),
     );
 
-    filters.insert(
-        "name:en".to_string(),
-        HashSet::from_iter(
-            vec!["Dendrariu Park"]
-                .iter()
-                .map(|item| item.to_string())
-                .collect::<Vec<String>>(),
-        ),
-    );
+    // filters.insert(
+    //     "wikidata".to_string(),
+    //     HashSet::from_iter(
+    //         vec!["Q25459177"]
+    //             .iter()
+    //             .map(|item| item.to_string())
+    //             .collect::<Vec<String>>(),
+    //     ),
+    // );
+    // filters.insert(
+    //     "name:en".to_string(),
+    //     HashSet::from_iter(
+    //         vec!["Dendrariu Park"]
+    //             .iter()
+    //             .map(|item| item.to_string())
+    //             .collect::<Vec<String>>(),
+    //     ),
+    // );
 
     filters
 }

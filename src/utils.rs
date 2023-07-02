@@ -4,6 +4,8 @@ use std::{
     sync::Arc,
 };
 
+use log::debug;
+
 use crate::{Osm, Relation, Way, TILE_SIZE};
 
 pub fn convert_to_tile(lat: f64, lon: f64) -> (f64, f64) {
@@ -76,4 +78,108 @@ pub fn create_filter_expression() -> HashMap<String, HashSet<String>> {
         ),
     );
     filters
+}
+
+pub fn extract_loops_to_render(
+    relation: &Relation,
+    id_to_ways: &HashMap<u64, Arc<Way>>,
+) -> Vec<Vec<u64>> {
+    let ways: Vec<&Arc<Way>> = relation
+        .member
+        .iter()
+        .flat_map(|member| id_to_ways.get(&member.member_ref))
+        .collect();
+
+    let mut ways_to_visit = ways.iter().fold(HashSet::<u64>::new(), |mut acc, way| {
+        acc.insert(way.id);
+        acc
+    });
+
+    let segments = ways
+        .iter()
+        .fold(HashMap::<u64, HashSet<u64>>::new(), |mut acc, way| {
+            acc.entry(way.nd.first().unwrap().reference)
+                .or_insert(HashSet::<u64>::new())
+                .insert(way.id);
+
+            acc.entry(way.nd.last().unwrap().reference)
+                .or_insert(HashSet::<u64>::new())
+                .insert(way.id);
+            acc
+        });
+
+    segments.iter().for_each(|(key, value)| {
+        debug!("segments for {} {:?}", key, value);
+    });
+
+    let mut loops = Vec::<Vec<u64>>::new();
+
+    loops.push(Vec::<u64>::new());
+
+    let a = ways.first().unwrap();
+
+    loops
+        .last_mut()
+        .unwrap()
+        .extend(a.nd.iter().map(|nd| nd.reference));
+    ways_to_visit.remove(&a.id);
+
+    while ways_to_visit.len() > 0 {
+        debug!(
+            "try to find next sgment for {}",
+            loops.last().unwrap().last().unwrap()
+        );
+        let next_way = if let Some(next_way_to_process) = segments
+            .get(loops.last().unwrap().last().unwrap())
+            .unwrap()
+            .iter()
+            .filter(|item| ways_to_visit.contains(item))
+            .last()
+        {
+            let b = id_to_ways.get(next_way_to_process).unwrap();
+
+            // check if we need to invert the sgment in order to mach the start of the new
+            // segment with the end of the previous
+            if loops
+                .last()
+                .unwrap()
+                .last()
+                .unwrap()
+                .eq(&b.nd.first().unwrap().reference)
+            {
+                loops
+                    .last_mut()
+                    .unwrap()
+                    .extend(b.nd.iter().map(|nd| nd.reference));
+            } else {
+                loops
+                    .last_mut()
+                    .unwrap()
+                    .extend(b.nd.iter().rev().map(|nd| nd.reference));
+            };
+            next_way_to_process
+        } else {
+            loops.push(Vec::<u64>::new());
+            debug!("processing new loop");
+            debug!("pick any out of {}", ways_to_visit.len());
+            let pick_new_way = ways_to_visit.iter().next().unwrap();
+            let a = id_to_ways.get(pick_new_way).unwrap();
+
+            loops
+                .last_mut()
+                .unwrap()
+                .extend(a.nd.iter().map(|nd| nd.reference));
+            &a.id
+        };
+
+        ways_to_visit.remove(next_way);
+    }
+
+    loops.iter().for_each(|ordered_nodes| {
+        debug!("nodes in order to render");
+        ordered_nodes.iter().for_each(|node| {
+            debug!("node {}", node);
+        });
+    });
+    loops
 }
