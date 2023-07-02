@@ -11,7 +11,7 @@ use env_logger::Env;
 use log::info;
 use osm_tiles::{
     utils::{convert_to_tile, extract_loops_to_render},
-    NodeToTile, Osm, Way, TILE_SIZE,
+    NodeToTile, Osm, Type, Way, TILE_SIZE,
 };
 
 const PADDING: f64 = 100f64;
@@ -129,7 +129,21 @@ async fn main() {
         let loops = extract_loops_to_render(relation.as_ref(), &id_to_ways);
 
         loops.iter().for_each(|ordered_nodes| {
+            let way_type = &ordered_nodes.member_type;
+            match way_type {
+                Type::Park => {
+                    context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
+                }
+                Type::Building => {
+                    context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
+                }
+                Type::Generic => {
+                    context.set_source_rgb(0.5, 0.5, 0.5);
+                }
+            }
+
             ordered_nodes
+                .memeber_loop
                 .iter()
                 .flat_map(|node| mapped_nodes.get(node))
                 .map(|(x, y)| {
@@ -141,7 +155,9 @@ async fn main() {
                     context.line_to(x, y);
                 });
 
-            context.fill().unwrap();
+            if let Type::Park | Type::Building = way_type {
+                context.fill().unwrap();
+            }
             context.stroke().unwrap();
         });
 

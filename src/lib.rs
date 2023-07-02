@@ -73,3 +73,29 @@ pub struct Osm {
     pub way: Vec<Arc<Way>>,
     pub node: Vec<Arc<Node>>,
 }
+
+pub enum Type {
+    Park,
+    Building,
+    Generic,
+}
+
+pub struct LoopWithType {
+    pub member_type: Type,
+    pub memeber_loop: Vec<u64>,
+}
+
+impl LoopWithType {
+    pub fn new() -> Self {
+        Self {
+            member_type: Type::Generic,
+            memeber_loop: Vec::<u64>::new(),
+        }
+    }
+    pub fn new_with_type(memeber_type: Type) -> Self {
+        Self {
+            member_type: memeber_type,
+            memeber_loop: Vec::<u64>::new(),
+        }
+    }
+}

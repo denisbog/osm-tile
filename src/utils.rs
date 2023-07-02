@@ -6,7 +6,7 @@ use std::{
 
 use log::debug;
 
-use crate::{Osm, Relation, Way, TILE_SIZE};
+use crate::{LoopWithType, Osm, Relation, Type, Way, TILE_SIZE};
 
 pub fn convert_to_tile(lat: f64, lon: f64) -> (f64, f64) {
     let (lat_rad, lon_rad) = (lat.to_radians(), lon.to_radians());
@@ -83,7 +83,7 @@ pub fn create_filter_expression() -> HashMap<String, HashSet<String>> {
 pub fn extract_loops_to_render(
     relation: &Relation,
     id_to_ways: &HashMap<u64, Arc<Way>>,
-) -> Vec<Vec<u64>> {
+) -> Vec<LoopWithType> {
     let ways: Vec<&Arc<Way>> = relation
         .member
         .iter()
@@ -112,25 +112,25 @@ pub fn extract_loops_to_render(
         debug!("segments for {} {:?}", key, value);
     });
 
-    let mut loops = Vec::<Vec<u64>>::new();
-
-    loops.push(Vec::<u64>::new());
+    let mut loops = Vec::<LoopWithType>::new();
 
     let a = ways.first().unwrap();
+    loops.push(LoopWithType::new_with_type(check_way_type(a)));
 
     loops
         .last_mut()
         .unwrap()
+        .memeber_loop
         .extend(a.nd.iter().map(|nd| nd.reference));
     ways_to_visit.remove(&a.id);
 
     while ways_to_visit.len() > 0 {
         debug!(
-            "try to find next sgment for {}",
-            loops.last().unwrap().last().unwrap()
+            "try to find next segment for {}",
+            loops.last().unwrap().memeber_loop.last().unwrap()
         );
         let next_way = if let Some(next_way_to_process) = segments
-            .get(loops.last().unwrap().last().unwrap())
+            .get(loops.last().unwrap().memeber_loop.last().unwrap())
             .unwrap()
             .iter()
             .filter(|item| ways_to_visit.contains(item))
@@ -140,34 +140,37 @@ pub fn extract_loops_to_render(
 
             // check if we need to invert the sgment in order to mach the start of the new
             // segment with the end of the previous
-            if loops
-                .last()
+            if loops.last().unwrap().memeber_loop.last().unwrap().eq(&b
+                .nd
+                .first()
                 .unwrap()
-                .last()
-                .unwrap()
-                .eq(&b.nd.first().unwrap().reference)
+                .reference)
             {
                 loops
                     .last_mut()
                     .unwrap()
+                    .memeber_loop
                     .extend(b.nd.iter().map(|nd| nd.reference));
             } else {
                 loops
                     .last_mut()
                     .unwrap()
+                    .memeber_loop
                     .extend(b.nd.iter().rev().map(|nd| nd.reference));
             };
             next_way_to_process
         } else {
-            loops.push(Vec::<u64>::new());
             debug!("processing new loop");
             debug!("pick any out of {}", ways_to_visit.len());
             let pick_new_way = ways_to_visit.iter().next().unwrap();
             let a = id_to_ways.get(pick_new_way).unwrap();
 
+            loops.push(LoopWithType::new_with_type(check_way_type(a)));
+
             loops
                 .last_mut()
                 .unwrap()
+                .memeber_loop
                 .extend(a.nd.iter().map(|nd| nd.reference));
             &a.id
         };
@@ -177,9 +180,34 @@ pub fn extract_loops_to_render(
 
     loops.iter().for_each(|ordered_nodes| {
         debug!("nodes in order to render");
-        ordered_nodes.iter().for_each(|node| {
+        ordered_nodes.memeber_loop.iter().for_each(|node| {
             debug!("node {}", node);
         });
     });
     loops
+}
+
+pub fn check_relation_type(relation: &Relation) -> Type {
+    if let Some(tag) = &relation.tag {
+        if let Some(tag) = tag.iter().find(|t| t.k.eq("leisure")) {
+            if tag.v.eq("park") {
+                return Type::Park;
+            }
+        } else if let Some(_) = tag.iter().find(|t| t.k.eq("building")) {
+            return Type::Building;
+        };
+    }
+    Type::Generic
+}
+pub fn check_way_type(way: &Way) -> Type {
+    if let Some(tag) = &way.tag {
+        if let Some(tag) = tag.iter().find(|t| t.k.eq("leisure")) {
+            if tag.v.eq("park") {
+                return Type::Park;
+            }
+        } else if let Some(_) = tag.iter().find(|t| t.k.eq("building")) {
+            return Type::Building;
+        }
+    }
+    Type::Generic
 }

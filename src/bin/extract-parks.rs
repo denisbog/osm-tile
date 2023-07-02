@@ -49,24 +49,33 @@ fn main() {
 pub fn create_filter_expression_to_filter_parks() -> HashMap<String, HashSet<String>> {
     let mut filters = HashMap::<String, HashSet<String>>::new();
     filters.insert(
-        "addr:city".to_string(),
+        "name".to_string(),
         HashSet::from_iter(
-            vec!["Chișinău"]
+            vec!["Strada Serghei Rahmaninov"]
                 .iter()
                 .map(|item| item.to_string())
                 .collect::<Vec<String>>(),
         ),
     );
-
-    filters.insert(
-        "leisure".to_string(),
-        HashSet::from_iter(
-            vec!["park"]
-                .iter()
-                .map(|item| item.to_string())
-                .collect::<Vec<String>>(),
-        ),
-    );
+    // filters.insert(
+    //     "addr:city".to_string(),
+    //     HashSet::from_iter(
+    //         vec!["Chișinău"]
+    //             .iter()
+    //             .map(|item| item.to_string())
+    //             .collect::<Vec<String>>(),
+    //     ),
+    // );
+    //
+    // filters.insert(
+    //     "leisure".to_string(),
+    //     HashSet::from_iter(
+    //         vec!["park"]
+    //             .iter()
+    //             .map(|item| item.to_string())
+    //             .collect::<Vec<String>>(),
+    //     ),
+    // );
 
     // filters.insert(
     //     "wikidata".to_string(),

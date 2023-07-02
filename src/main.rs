@@ -9,8 +9,11 @@ use ciborium::from_reader;
 use env_logger::Env;
 use log::info;
 use osm_tiles::{
-    utils::{convert_to_int_tile, convert_to_tile, extract_loops_to_render},
-    NodeToTile, Osm, Relation, RelationToTile, Way, WayToTile, TILE_SIZE,
+    utils::{
+        check_relation_type, check_way_type, convert_to_int_tile, convert_to_tile,
+        extract_loops_to_render,
+    },
+    NodeToTile, Osm, Relation, RelationToTile, Type, Way, WayToTile, TILE_SIZE,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -73,7 +76,7 @@ fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
             relation
                 .member
                 .iter()
-                .filter(|member| member.role.eq("outer"))
+                // .filter(|member| member.role.eq("outer"))
                 .flat_map(|member| id_to_ways.get(&member.member_ref))
                 .flat_map(|way| way.nd.iter())
                 .for_each(|node| {
@@ -246,23 +249,6 @@ async fn render_tile_cache(
     )
 }
 
-fn check_if_relation_is_park(relation: &Relation) -> bool {
-    if let Some(tag) = &relation.tag {
-        if let Some(tag) = tag.iter().find(|t| t.k.eq("leisure")) {
-            return tag.v.eq("park");
-        }
-    }
-    false
-}
-fn check_if_park(way: &Way) -> bool {
-    if let Some(tag) = &way.tag {
-        if let Some(tag) = tag.iter().find(|t| t.k.eq("leisure")) {
-            return tag.v.eq("park");
-        }
-    }
-
-    false
-}
 fn draw_to_memory(
     z: i32,
     mapped_nodes: &HashMap<u64, (f64, f64)>,
@@ -286,12 +272,20 @@ fn draw_to_memory(
     context.set_line_width(1f64);
 
     ways.iter().for_each(|way| {
-        let is_park = check_if_park(way);
-        if is_park {
-            context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
-        } else {
-            context.set_source_rgb(0.5, 0.5, 0.5);
+        let way_type = check_way_type(way);
+
+        match way_type {
+            Type::Park => {
+                context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
+            }
+            Type::Building => {
+                context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
+            }
+            Type::Generic => {
+                context.set_source_rgb(0.5, 0.5, 0.5);
+            }
         }
+
         way.nd
             .iter()
             .flat_map(|nd| mapped_nodes.get(&nd.reference))
@@ -303,24 +297,37 @@ fn draw_to_memory(
             .for_each(|(x, y)| {
                 context.line_to(x, y);
             });
-        if is_park {
+
+        if let Type::Park | Type::Building = way_type {
             context.fill().unwrap();
         }
         context.stroke().unwrap();
     });
 
     relations.iter().for_each(|relation| {
-        let is_park = check_if_relation_is_park(relation);
+        let relation_type = check_relation_type(relation);
 
-        if is_park {
-            context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
-        } else {
-            context.set_source_rgb(0.5, 0.5, 0.5);
+        match relation_type {
+            Type::Park => {
+                context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
+            }
+            _ => {
+                context.set_source_rgb(0.5, 0.5, 0.5);
+            }
         }
 
         let loops = extract_loops_to_render(relation.as_ref(), &id_to_ways);
         loops.iter().for_each(|ordered_nodes| {
+            let way_type = &ordered_nodes.member_type;
+
+            match way_type {
+                Type::Building => {
+                    context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
+                }
+                _ => {}
+            };
             ordered_nodes
+                .memeber_loop
                 .iter()
                 .flat_map(|node| mapped_nodes.get(node))
                 .map(|(x, y)| {
@@ -332,7 +339,9 @@ fn draw_to_memory(
                     context.line_to(x, y);
                 });
 
-            if is_park {
+            if let Type::Park | Type::Building = way_type {
+                context.fill().unwrap();
+            } else if let Type::Park = relation_type {
                 context.fill().unwrap();
             }
             context.stroke().unwrap();
@@ -341,17 +350,17 @@ fn draw_to_memory(
         context.stroke().unwrap();
     });
 
-    if z > 16 {
-        ways.iter().for_each(|way| {
-            way.nd.iter().for_each(|node| {
-                let point = mapped_nodes.get(&node.reference).unwrap();
-                let x = point.0 - min_x;
-                let y = point.1 - min_y;
-                context.rectangle(x - 1f64, y - 1f64, 3f64, 3f64);
-            });
-        });
-        context.stroke().unwrap();
-    }
+    // if z > 16 {
+    //     ways.iter().for_each(|way| {
+    //         way.nd.iter().for_each(|node| {
+    //             let point = mapped_nodes.get(&node.reference).unwrap();
+    //             let x = point.0 - min_x;
+    //             let y = point.1 - min_y;
+    //             context.rectangle(x - 1f64, y - 1f64, 3f64, 3f64);
+    //         });
+    //     });
+    //     context.stroke().unwrap();
+    // }
 
     context.set_source_rgb(0.7, 0.7, 0.7);
     context.line_to(TILE_SIZE as f64, 0 as f64);
