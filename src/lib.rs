@@ -83,6 +83,7 @@ pub enum Type {
 pub struct LoopWithType {
     pub member_type: Type,
     pub memeber_loop: Vec<u64>,
+    pub way_id: Option<u64>,
 }
 
 impl LoopWithType {
@@ -90,12 +91,14 @@ impl LoopWithType {
         Self {
             member_type: Type::Generic,
             memeber_loop: Vec::<u64>::new(),
+            way_id: None,
         }
     }
-    pub fn new_with_type(memeber_type: Type) -> Self {
+    pub fn new_with_type(way_id: u64, memeber_type: Type) -> Self {
         Self {
             member_type: memeber_type,
             memeber_loop: Vec::<u64>::new(),
+            way_id: Some(way_id),
         }
     }
 }

@@ -299,6 +299,18 @@ fn draw_to_memory(
             });
 
         if let Type::Park | Type::Building = way_type {
+            if let Type::Building = way_type {
+                if z > 16 {
+                    render_building_number(
+                        way,
+                        &way.nd.iter().map(|nd| nd.reference).collect::<Vec<u64>>(),
+                        mapped_nodes,
+                        min_x,
+                        min_y,
+                        &context,
+                    );
+                }
+            }
             context.fill().unwrap();
         }
         context.stroke().unwrap();
@@ -341,6 +353,20 @@ fn draw_to_memory(
 
             if let Type::Park | Type::Building = way_type {
                 context.fill().unwrap();
+                if z > 16 {
+                    //render bulding address
+                    if let Some(way_id) = ordered_nodes.way_id {
+                        let way = id_to_ways.get(&way_id).unwrap();
+                        render_building_number(
+                            way,
+                            &ordered_nodes.memeber_loop,
+                            mapped_nodes,
+                            min_x,
+                            min_y,
+                            &context,
+                        );
+                    }
+                }
             } else if let Type::Park = relation_type {
                 context.fill().unwrap();
             }
@@ -371,6 +397,37 @@ fn draw_to_memory(
     let mut buffer = BufWriter::new(Vec::<u8>::new());
     surface.write_to_png(&mut buffer).unwrap();
     buffer.into_inner().unwrap()
+}
+
+fn render_building_number(
+    way: &Way,
+    ordered_nodes: &Vec<u64>,
+    mapped_nodes: &HashMap<u64, (f64, f64)>,
+    min_x: f64,
+    min_y: f64,
+    context: &Context,
+) {
+    if let Some(tag) = &way.tag {
+        if let Some(tag) = &tag.iter().filter(|tag| tag.k.eq("addr:housenumber")).last() {
+            ordered_nodes
+                .iter()
+                .flat_map(|node| mapped_nodes.get(node))
+                .map(|(x, y)| {
+                    let x = x - min_x;
+                    let y = y - min_y;
+                    (x, y)
+                })
+                .reduce(|(x, y), (x1, y1)| (x + x1, y + y1))
+                .map(|(x, y)| {
+                    let points = ordered_nodes.len() as f64;
+                    (x / points, y / points)
+                })
+                .map(|(x, y)| {
+                    context.move_to(x, y);
+                });
+            context.show_text(&tag.v).unwrap();
+        }
+    }
 }
 
 #[tokio::main]

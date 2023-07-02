@@ -115,7 +115,7 @@ pub fn extract_loops_to_render(
     let mut loops = Vec::<LoopWithType>::new();
 
     let a = ways.first().unwrap();
-    loops.push(LoopWithType::new_with_type(check_way_type(a)));
+    loops.push(LoopWithType::new_with_type(a.id, check_way_type(a)));
 
     loops
         .last_mut()
@@ -165,7 +165,7 @@ pub fn extract_loops_to_render(
             let pick_new_way = ways_to_visit.iter().next().unwrap();
             let a = id_to_ways.get(pick_new_way).unwrap();
 
-            loops.push(LoopWithType::new_with_type(check_way_type(a)));
+            loops.push(LoopWithType::new_with_type(a.id, check_way_type(a)));
 
             loops
                 .last_mut()
