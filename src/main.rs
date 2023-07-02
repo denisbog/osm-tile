@@ -373,41 +373,7 @@ async fn main() {
 
     let osm = Arc::new(load_binary_osm());
 
-    // let filtered_relations = filter_relations(&osm, &create_filter_expression());
-    // let filtered_ways = filter_ways_from_relations(&osm, &filtered_relations);
-    //
-    // let nodes_to_filder: HashSet<u64> = filtered_ways
-    //     .iter()
-    //     .flat_map(|way| way.nd.iter())
-    //     .map(|nd| nd.reference)
-    //     .collect();
-    //
-    // let mut filtered_nodes = osm.node.clone();
-    // filtered_nodes.retain(|node| nodes_to_filder.contains(&node.id));
-    //
-    // let nodes_to_filder: HashSet<u64> = filtered_ways
-    //     .iter()
-    //     .flat_map(|way| way.nd.iter().map(|nd| nd.reference))
-    //     .collect();
-    //
-    // let mut filtered_nodes = osm.node.clone();
-    // filtered_nodes.retain(|node| nodes_to_filder.contains(&node.id));
-
-    // let filtered_osm = Arc::new(Osm {
-    //     way: filtered_ways,
-    //     node: filtered_nodes,
-    //     relation: filtered_relations,
-    // });
-
-    // let mut string = String::new();
-    // to_writer(&mut string, &filtered_osm).unwrap();
-    // let mut buf_writer = BufWriter::new(File::create("temp.xml").unwrap());
-    // buf_writer.write_all(string.as_bytes()).unwrap();
-
     let filtered_osm = osm.clone();
-    //
-    // let filtered_osm = Arc::new(osm);
-
     let cors = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(Any)
@@ -430,37 +396,19 @@ async fn main() {
 
 #[cfg(test)]
 mod test {
-    // use std::{
-    //     fs::File,
-    //     io::{BufWriter, Write},
-    //     sync::Arc,
-    // };
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
-    // use crate::{build_index_for_zoom, filter_osm, render_tile_inner};
+    use crate::{build_index_for_zoom, load_binary_osm, render_tile_inner};
 
     #[tokio::test]
-    async fn name() {
-        // let osm = filter_osm();
-        // let index = build_index_for_zoom(osm, 14);
-        // let data = render_tile_inner(
-        //     297,
-        //     178,
-        //     Arc::new(index.2),
-        //     Arc::new(index.1),
-        //     Arc::new(index.0),
-        // )
-        // .await;
-        //
-        // BufWriter::new(File::create("test-tile.png").unwrap())
-        //     .write(&data)
-        //     .unwrap();
-    }
-    #[test]
-    fn check() {
-        let init = [1, 0, -1];
+    async fn render_tile_test() {
+        let osm = Arc::new(load_binary_osm());
+        let index = build_index_for_zoom(osm.clone(), 13);
+        let data = render_tile_inner(13, 4753, 2881, osm, &index).await;
 
-        init.iter()
-            .enumerate()
-            .flat_map(|(index, item)| init.iter().skip(index));
+        tokio::fs::write(&PathBuf::from("test-tile.png"), &data)
+            .await
+            .expect("storing rendition file");
     }
 }

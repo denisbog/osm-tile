@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs::File,
     io::{BufReader, BufWriter},
     path::PathBuf,
@@ -11,7 +11,7 @@ use env_logger::Env;
 use log::info;
 use osm_tiles::{
     utils::{convert_to_tile, extract_loops_to_render},
-    NodeToTile, Osm, Relation, Way, TILE_SIZE,
+    NodeToTile, Osm, Way, TILE_SIZE,
 };
 
 const PADDING: f64 = 100f64;
