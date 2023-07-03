@@ -287,7 +287,7 @@ fn draw_to_memory(
                 context.line_to(x, y);
             });
 
-        if let Type::Park | Type::Building = way_type {
+        if let Type::Park | Type::Building | Type::Water = way_type {
             if let Type::Building = way_type {
                 if z > 16 {
                     render_building_number(
@@ -333,7 +333,7 @@ fn draw_to_memory(
                     context.line_to(x, y);
                 });
 
-            if let Type::Park | Type::Building = way_type {
+            if let Type::Park | Type::Building | Type::Water = way_type {
                 context.fill().unwrap();
 
                 if let Type::Building = way_type {
@@ -352,7 +352,7 @@ fn draw_to_memory(
                         }
                     }
                 }
-            } else if let Type::Park = relation_type {
+            } else if let Type::Park | Type::Water = relation_type {
                 context.fill().unwrap();
             }
             context.stroke().unwrap();
@@ -375,7 +375,7 @@ fn draw_to_memory(
 fn set_context_for_type(way_type: &Type, context: &Context) {
     context.set_line_width(1f64);
     match *way_type {
-        Type::Water => {
+        Type::Water | Type::WaterRiver => {
             context.set_source_rgba(0.5, 0.5, 1.0, 0.4);
             context.set_line_width(3f64);
         }

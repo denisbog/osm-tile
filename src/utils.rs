@@ -213,7 +213,7 @@ fn check_tag_type(tag: &Vec<Tag>) -> Type {
             return Type::Water;
         }
     } else if let Some(_) = tag.iter().find(|t| t.k.eq("waterway")) {
-        return Type::Water;
+        return Type::WaterRiver;
     };
     Type::Generic
 }
