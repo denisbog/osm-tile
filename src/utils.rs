@@ -6,7 +6,7 @@ use std::{
 
 use log::debug;
 
-use crate::{LoopWithType, Osm, Relation, Type, Way, TILE_SIZE};
+use crate::{LoopWithType, Osm, Relation, Tag, Type, Way, TILE_SIZE};
 
 pub fn convert_to_tile(lat: f64, lon: f64) -> (f64, f64) {
     let (lat_rad, lon_rad) = (lat.to_radians(), lon.to_radians());
@@ -189,25 +189,31 @@ pub fn extract_loops_to_render(
 
 pub fn check_relation_type(relation: &Relation) -> Type {
     if let Some(tag) = &relation.tag {
-        if let Some(tag) = tag.iter().find(|t| t.k.eq("leisure")) {
-            if tag.v.eq("park") {
-                return Type::Park;
-            }
-        } else if let Some(_) = tag.iter().find(|t| t.k.eq("building")) {
-            return Type::Building;
-        };
+        return check_tag_type(tag);
     }
+
     Type::Generic
 }
 pub fn check_way_type(way: &Way) -> Type {
     if let Some(tag) = &way.tag {
-        if let Some(tag) = tag.iter().find(|t| t.k.eq("leisure")) {
-            if tag.v.eq("park") {
-                return Type::Park;
-            }
-        } else if let Some(_) = tag.iter().find(|t| t.k.eq("building")) {
-            return Type::Building;
-        }
+        return check_tag_type(tag);
     }
+    Type::Generic
+}
+
+fn check_tag_type(tag: &Vec<Tag>) -> Type {
+    if let Some(tag) = tag.iter().find(|t| t.k.eq("leisure")) {
+        if tag.v.eq("park") {
+            return Type::Park;
+        }
+    } else if let Some(_) = tag.iter().find(|t| t.k.eq("building")) {
+        return Type::Building;
+    } else if let Some(tag) = tag.iter().find(|t| t.k.eq("natural")) {
+        if tag.v.eq("water") {
+            return Type::Water;
+        }
+    } else if let Some(_) = tag.iter().find(|t| t.k.eq("waterway")) {
+        return Type::Water;
+    };
     Type::Generic
 }

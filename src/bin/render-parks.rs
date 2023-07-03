@@ -131,6 +131,9 @@ async fn main() {
         loops.iter().for_each(|ordered_nodes| {
             let way_type = &ordered_nodes.member_type;
             match way_type {
+                Type::Water => {
+                    context.set_source_rgba(0.5, 5.0, 1.0, 0.2);
+                }
                 Type::Park => {
                     context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
                 }

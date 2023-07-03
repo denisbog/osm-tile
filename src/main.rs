@@ -273,18 +273,7 @@ fn draw_to_memory(
 
     ways.iter().for_each(|way| {
         let way_type = check_way_type(way);
-
-        match way_type {
-            Type::Park => {
-                context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
-            }
-            Type::Building => {
-                context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
-            }
-            Type::Generic => {
-                context.set_source_rgb(0.5, 0.5, 0.5);
-            }
-        }
+        set_context_for_type(&way_type, &context);
 
         way.nd
             .iter()
@@ -319,14 +308,7 @@ fn draw_to_memory(
     relations.iter().for_each(|relation| {
         let relation_type = check_relation_type(relation);
 
-        match relation_type {
-            Type::Park => {
-                context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
-            }
-            _ => {
-                context.set_source_rgb(0.5, 0.5, 0.5);
-            }
-        }
+        set_context_for_type(&relation_type, &context);
 
         let loops = extract_loops_to_render(relation.as_ref(), &id_to_ways);
         loops.iter().for_each(|ordered_nodes| {
@@ -353,18 +335,21 @@ fn draw_to_memory(
 
             if let Type::Park | Type::Building = way_type {
                 context.fill().unwrap();
-                if z > 16 {
-                    //render bulding address
-                    if let Some(way_id) = ordered_nodes.way_id {
-                        let way = id_to_ways.get(&way_id).unwrap();
-                        render_building_number(
-                            way,
-                            &ordered_nodes.memeber_loop,
-                            mapped_nodes,
-                            min_x,
-                            min_y,
-                            &context,
-                        );
+
+                if let Type::Building = way_type {
+                    if z > 16 {
+                        //render bulding address
+                        if let Some(way_id) = ordered_nodes.way_id {
+                            let way = id_to_ways.get(&way_id).unwrap();
+                            render_building_number(
+                                way,
+                                &ordered_nodes.memeber_loop,
+                                mapped_nodes,
+                                min_x,
+                                min_y,
+                                &context,
+                            );
+                        }
                     }
                 }
             } else if let Type::Park = relation_type {
@@ -376,18 +361,6 @@ fn draw_to_memory(
         context.stroke().unwrap();
     });
 
-    // if z > 16 {
-    //     ways.iter().for_each(|way| {
-    //         way.nd.iter().for_each(|node| {
-    //             let point = mapped_nodes.get(&node.reference).unwrap();
-    //             let x = point.0 - min_x;
-    //             let y = point.1 - min_y;
-    //             context.rectangle(x - 1f64, y - 1f64, 3f64, 3f64);
-    //         });
-    //     });
-    //     context.stroke().unwrap();
-    // }
-
     context.set_source_rgb(0.7, 0.7, 0.7);
     context.line_to(TILE_SIZE as f64, 0 as f64);
     context.line_to(0 as f64, 0 as f64);
@@ -397,6 +370,25 @@ fn draw_to_memory(
     let mut buffer = BufWriter::new(Vec::<u8>::new());
     surface.write_to_png(&mut buffer).unwrap();
     buffer.into_inner().unwrap()
+}
+
+fn set_context_for_type(way_type: &Type, context: &Context) {
+    context.set_line_width(1f64);
+    match *way_type {
+        Type::Water => {
+            context.set_source_rgba(0.5, 0.5, 1.0, 0.4);
+            context.set_line_width(3f64);
+        }
+        Type::Park => {
+            context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
+        }
+        Type::Building => {
+            context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
+        }
+        Type::Generic => {
+            context.set_source_rgb(0.5, 0.5, 0.5);
+        }
+    }
 }
 
 fn render_building_number(

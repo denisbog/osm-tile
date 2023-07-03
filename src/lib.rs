@@ -78,6 +78,7 @@ pub enum Type {
     Park,
     Building,
     Generic,
+    Water,
 }
 
 pub struct LoopWithType {
