@@ -258,6 +258,25 @@ fn draw_to_memory(
     ways: &[Arc<Way>],
     id_to_ways: &HashMap<u64, Arc<Way>>,
 ) -> Vec<u8> {
+    let type_of_relations = relations.iter().fold(
+        HashMap::<Type, Vec<Arc<Relation>>>::new(),
+        |mut acc, relation| {
+            acc.entry(check_relation_type(relation))
+                .or_insert(Vec::<Arc<Relation>>::new())
+                .push(relation.clone());
+            acc
+        },
+    );
+
+    let type_of_ways = ways
+        .iter()
+        .fold(HashMap::<Type, Vec<Arc<Way>>>::new(), |mut acc, way| {
+            acc.entry(check_way_type(way))
+                .or_insert(Vec::<Arc<Way>>::new())
+                .push(way.clone());
+            acc
+        });
+
     let surface =
         ImageSurface::create(cairo::Format::Rgb24, TILE_SIZE as i32, TILE_SIZE as i32).unwrap();
     let context = Context::new(&surface).unwrap();
@@ -271,94 +290,44 @@ fn draw_to_memory(
     context.set_source_rgb(0.5, 0.5, 0.5);
     context.set_line_width(1f64);
 
-    ways.iter().for_each(|way| {
-        let way_type = check_way_type(way);
-        set_context_for_type(&way_type, &context);
+    let mut ordered_ways_to_render = Vec::<Arc<Way>>::new();
 
-        way.nd
-            .iter()
-            .flat_map(|nd| mapped_nodes.get(&nd.reference))
-            .map(|(x, y)| {
-                let x = x - min_x;
-                let y = y - min_y;
-                (x, y)
-            })
-            .for_each(|(x, y)| {
-                context.line_to(x, y);
-            });
+    let render_order = [
+        Type::WaterRiver,
+        Type::Water,
+        Type::Park,
+        Type::Building,
+        Type::Generic,
+    ];
 
-        if let Type::Park | Type::Building | Type::Water = way_type {
-            if let Type::Building = way_type {
-                if z > 16 {
-                    render_building_number(
-                        way,
-                        &way.nd.iter().map(|nd| nd.reference).collect::<Vec<u64>>(),
-                        mapped_nodes,
-                        min_x,
-                        min_y,
-                        &context,
-                    );
-                }
-            }
-            context.fill().unwrap();
-        }
-        context.stroke().unwrap();
+    for types in &render_order {
+        extract_and_append_ways_of_type(types, &mut ordered_ways_to_render, &type_of_ways);
+    }
+
+    ordered_ways_to_render.iter().for_each(|way| {
+        render_way(way, &context, mapped_nodes, min_x, min_y, z);
     });
 
-    relations.iter().for_each(|relation| {
-        let relation_type = check_relation_type(relation);
+    let mut ordered_relations_to_render = Vec::<Arc<Relation>>::new();
 
-        set_context_for_type(&relation_type, &context);
+    for types in &render_order {
+        extract_and_append_relations_of_type(
+            types,
+            &mut ordered_relations_to_render,
+            &type_of_relations,
+        );
+    }
 
-        let loops = extract_loops_to_render(relation.as_ref(), &id_to_ways);
-        loops.iter().for_each(|ordered_nodes| {
-            let way_type = &ordered_nodes.member_type;
-
-            match way_type {
-                Type::Building => {
-                    context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
-                }
-                _ => {}
-            };
-            ordered_nodes
-                .memeber_loop
-                .iter()
-                .flat_map(|node| mapped_nodes.get(node))
-                .map(|(x, y)| {
-                    let x = x - min_x;
-                    let y = y - min_y;
-                    (x, y)
-                })
-                .for_each(|(x, y)| {
-                    context.line_to(x, y);
-                });
-
-            if let Type::Park | Type::Building | Type::Water = way_type {
-                context.fill().unwrap();
-
-                if let Type::Building = way_type {
-                    if z > 16 {
-                        //render bulding address
-                        if let Some(way_id) = ordered_nodes.way_id {
-                            let way = id_to_ways.get(&way_id).unwrap();
-                            render_building_number(
-                                way,
-                                &ordered_nodes.memeber_loop,
-                                mapped_nodes,
-                                min_x,
-                                min_y,
-                                &context,
-                            );
-                        }
-                    }
-                }
-            } else if let Type::Park | Type::Water = relation_type {
-                context.fill().unwrap();
-            }
-            context.stroke().unwrap();
-        });
-
-        context.stroke().unwrap();
+    ordered_relations_to_render.iter().for_each(|relation| {
+        render_relation(
+            relation,
+            &context,
+            id_to_ways,
+            mapped_nodes,
+            min_x,
+            min_y,
+            z,
+        );
     });
 
     context.set_source_rgb(0.7, 0.7, 0.7);
@@ -370,6 +339,138 @@ fn draw_to_memory(
     let mut buffer = BufWriter::new(Vec::<u8>::new());
     surface.write_to_png(&mut buffer).unwrap();
     buffer.into_inner().unwrap()
+}
+
+fn extract_and_append_ways_of_type(
+    filter_type: &Type,
+    ordered_relations_to_render: &mut Vec<Arc<Way>>,
+    type_of_relations: &HashMap<Type, Vec<Arc<Way>>>,
+) {
+    ordered_relations_to_render.extend(
+        type_of_relations
+            .get(filter_type)
+            .unwrap_or(&Vec::<Arc<Way>>::new())
+            .iter()
+            .cloned(),
+    );
+}
+fn extract_and_append_relations_of_type(
+    filter_type: &Type,
+    ordered_relations_to_render: &mut Vec<Arc<Relation>>,
+    type_of_relations: &HashMap<Type, Vec<Arc<Relation>>>,
+) {
+    ordered_relations_to_render.extend(
+        type_of_relations
+            .get(filter_type)
+            .unwrap_or(&Vec::<Arc<Relation>>::new())
+            .iter()
+            .cloned(),
+    );
+}
+
+fn render_relation(
+    relation: &Arc<Relation>,
+    context: &Context,
+    id_to_ways: &HashMap<u64, Arc<Way>>,
+    mapped_nodes: &HashMap<u64, (f64, f64)>,
+    min_x: f64,
+    min_y: f64,
+    z: i32,
+) {
+    let relation_type = check_relation_type(relation);
+
+    set_context_for_type(&relation_type, context);
+
+    let loops = extract_loops_to_render(relation.as_ref(), &id_to_ways);
+    loops.iter().for_each(|ordered_nodes| {
+        let way_type = &ordered_nodes.member_type;
+
+        match way_type {
+            Type::Building => {
+                context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
+            }
+            _ => {}
+        };
+        ordered_nodes
+            .memeber_loop
+            .iter()
+            .flat_map(|node| mapped_nodes.get(node))
+            .map(|(x, y)| {
+                let x = x - min_x;
+                let y = y - min_y;
+                (x, y)
+            })
+            .for_each(|(x, y)| {
+                context.line_to(x, y);
+            });
+
+        if let Type::Park | Type::Building | Type::Water = way_type {
+            context.fill().unwrap();
+
+            if let Type::Building = way_type {
+                if z > 16 {
+                    //render bulding address
+                    if let Some(way_id) = ordered_nodes.way_id {
+                        let way = id_to_ways.get(&way_id).unwrap();
+                        render_building_number(
+                            way,
+                            &ordered_nodes.memeber_loop,
+                            mapped_nodes,
+                            min_x,
+                            min_y,
+                            context,
+                        );
+                    }
+                }
+            }
+        } else if let Type::Park | Type::Water = relation_type {
+            context.fill().unwrap();
+        }
+        context.stroke().unwrap();
+    });
+
+    context.stroke().unwrap();
+}
+
+fn render_way(
+    way: &Arc<Way>,
+    context: &Context,
+    mapped_nodes: &HashMap<u64, (f64, f64)>,
+    min_x: f64,
+    min_y: f64,
+    z: i32,
+) {
+    let way_type = check_way_type(way);
+    set_context_for_type(&way_type, context);
+
+    way.nd
+        .iter()
+        .flat_map(|nd| mapped_nodes.get(&nd.reference))
+        .map(|(x, y)| {
+            let x = x - min_x;
+            let y = y - min_y;
+            (x, y)
+        })
+        .for_each(|(x, y)| {
+            context.line_to(x, y);
+        });
+
+    if let Type::Park | Type::Building | Type::Water = way_type {
+        if let Type::Building = way_type {
+            if z > 16 {
+                render_building_number(
+                    way,
+                    &way.nd.iter().map(|nd| nd.reference).collect::<Vec<u64>>(),
+                    mapped_nodes,
+                    min_x,
+                    min_y,
+                    context,
+                );
+            }
+        }
+        context.fill().unwrap();
+    }
+    context.stroke().unwrap();
 }
 
 fn set_context_for_type(way_type: &Type, context: &Context) {

@@ -73,7 +73,7 @@ pub struct Osm {
     pub way: Vec<Arc<Way>>,
     pub node: Vec<Arc<Node>>,
 }
-
+#[derive(PartialEq, Eq, Hash)]
 pub enum Type {
     Park,
     Building,
