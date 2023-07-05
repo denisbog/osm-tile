@@ -11,7 +11,7 @@ use log::info;
 use osm_tiles::{
     utils::{
         check_relation_type, check_way_type, convert_to_int_tile, convert_to_tile,
-        extract_loops_to_render,
+        extract_loops_to_render, set_context_for_type,
     },
     NodeToTile, Osm, Relation, RelationToTile, Type, Way, WayToTile, TILE_SIZE,
 };
@@ -174,7 +174,7 @@ async fn render_tile_inner(z: i32, x: i32, y: i32, osm: Arc<Osm>, index: &Index)
         if let Some(inner) = inner.get(&y) {
             inner
                 .iter()
-                .flat_map(|inner| index.id_to_ways.get(&inner))
+                .flat_map(|inner| index.id_to_ways.get(inner))
                 .cloned()
                 .collect()
         } else {
@@ -290,45 +290,39 @@ fn draw_to_memory(
     context.set_source_rgb(0.5, 0.5, 0.5);
     context.set_line_width(1f64);
 
-    let mut ordered_ways_to_render = Vec::<Arc<Way>>::new();
-
     let render_order = [
+        Type::Park,
         Type::WaterRiver,
         Type::Water,
-        Type::Park,
-        Type::Building,
         Type::Generic,
+        Type::Building,
     ];
 
-    for types in &render_order {
-        extract_and_append_ways_of_type(types, &mut ordered_ways_to_render, &type_of_ways);
+    for filter_type in &render_order {
+        type_of_ways
+            .get(filter_type)
+            .unwrap_or(&Vec::<Arc<Way>>::new())
+            .iter()
+            .for_each(|way| {
+                render_way(way, &context, mapped_nodes, min_x, min_y, z);
+            });
+
+        type_of_relations
+            .get(filter_type)
+            .unwrap_or(&Vec::<Arc<Relation>>::new())
+            .iter()
+            .for_each(|relation| {
+                render_relation(
+                    relation,
+                    &context,
+                    id_to_ways,
+                    mapped_nodes,
+                    min_x,
+                    min_y,
+                    z,
+                );
+            });
     }
-
-    ordered_ways_to_render.iter().for_each(|way| {
-        render_way(way, &context, mapped_nodes, min_x, min_y, z);
-    });
-
-    let mut ordered_relations_to_render = Vec::<Arc<Relation>>::new();
-
-    for types in &render_order {
-        extract_and_append_relations_of_type(
-            types,
-            &mut ordered_relations_to_render,
-            &type_of_relations,
-        );
-    }
-
-    ordered_relations_to_render.iter().for_each(|relation| {
-        render_relation(
-            relation,
-            &context,
-            id_to_ways,
-            mapped_nodes,
-            min_x,
-            min_y,
-            z,
-        );
-    });
 
     context.set_source_rgb(0.7, 0.7, 0.7);
     context.line_to(TILE_SIZE as f64, 0 as f64);
@@ -339,33 +333,6 @@ fn draw_to_memory(
     let mut buffer = BufWriter::new(Vec::<u8>::new());
     surface.write_to_png(&mut buffer).unwrap();
     buffer.into_inner().unwrap()
-}
-
-fn extract_and_append_ways_of_type(
-    filter_type: &Type,
-    ordered_relations_to_render: &mut Vec<Arc<Way>>,
-    type_of_relations: &HashMap<Type, Vec<Arc<Way>>>,
-) {
-    ordered_relations_to_render.extend(
-        type_of_relations
-            .get(filter_type)
-            .unwrap_or(&Vec::<Arc<Way>>::new())
-            .iter()
-            .cloned(),
-    );
-}
-fn extract_and_append_relations_of_type(
-    filter_type: &Type,
-    ordered_relations_to_render: &mut Vec<Arc<Relation>>,
-    type_of_relations: &HashMap<Type, Vec<Arc<Relation>>>,
-) {
-    ordered_relations_to_render.extend(
-        type_of_relations
-            .get(filter_type)
-            .unwrap_or(&Vec::<Arc<Relation>>::new())
-            .iter()
-            .cloned(),
-    );
 }
 
 fn render_relation(
@@ -381,16 +348,13 @@ fn render_relation(
 
     set_context_for_type(&relation_type, context);
 
-    let loops = extract_loops_to_render(relation.as_ref(), &id_to_ways);
+    let loops = extract_loops_to_render(relation.as_ref(), id_to_ways);
     loops.iter().for_each(|ordered_nodes| {
         let way_type = &ordered_nodes.member_type;
 
-        match way_type {
-            Type::Building => {
-                context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
-            }
-            _ => {}
-        };
+        if way_type == &Type::Building {
+            context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
+        }
         ordered_nodes
             .memeber_loop
             .iter()
@@ -428,7 +392,6 @@ fn render_relation(
         }
         context.stroke().unwrap();
     });
-
     context.stroke().unwrap();
 }
 
@@ -473,25 +436,6 @@ fn render_way(
     context.stroke().unwrap();
 }
 
-fn set_context_for_type(way_type: &Type, context: &Context) {
-    context.set_line_width(1f64);
-    match *way_type {
-        Type::Water | Type::WaterRiver => {
-            context.set_source_rgba(0.5, 0.5, 1.0, 0.4);
-            context.set_line_width(3f64);
-        }
-        Type::Park => {
-            context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
-        }
-        Type::Building => {
-            context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
-        }
-        Type::Generic => {
-            context.set_source_rgb(0.5, 0.5, 0.5);
-        }
-    }
-}
-
 fn render_building_number(
     way: &Way,
     ordered_nodes: &Vec<u64>,
@@ -502,7 +446,7 @@ fn render_building_number(
 ) {
     if let Some(tag) = &way.tag {
         if let Some(tag) = &tag.iter().filter(|tag| tag.k.eq("addr:housenumber")).last() {
-            ordered_nodes
+            if let Some((x, y)) = ordered_nodes
                 .iter()
                 .flat_map(|node| mapped_nodes.get(node))
                 .map(|(x, y)| {
@@ -515,9 +459,9 @@ fn render_building_number(
                     let points = ordered_nodes.len() as f64;
                     (x / points, y / points)
                 })
-                .map(|(x, y)| {
-                    context.move_to(x, y);
-                });
+            {
+                context.move_to(x, y);
+            };
             context.show_text(&tag.v).unwrap();
         }
     }

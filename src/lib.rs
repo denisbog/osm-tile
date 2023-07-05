@@ -89,7 +89,7 @@ pub struct LoopWithType {
 }
 
 impl LoopWithType {
-    pub fn new() -> Self {
+    pub fn new_no_default() -> Self {
         Self {
             member_type: Type::Generic,
             memeber_loop: Vec::<u64>::new(),

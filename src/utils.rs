@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+use cairo::Context;
 use log::debug;
 
 use crate::{LoopWithType, Osm, Relation, Tag, Type, Way, TILE_SIZE};
@@ -124,7 +125,7 @@ pub fn extract_loops_to_render(
         .extend(a.nd.iter().map(|nd| nd.reference));
     ways_to_visit.remove(&a.id);
 
-    while ways_to_visit.len() > 0 {
+    while !ways_to_visit.is_empty() {
         debug!(
             "try to find next segment for {}",
             loops.last().unwrap().memeber_loop.last().unwrap()
@@ -201,19 +202,38 @@ pub fn check_way_type(way: &Way) -> Type {
     Type::Generic
 }
 
-fn check_tag_type(tag: &Vec<Tag>) -> Type {
+fn check_tag_type(tag: &[Tag]) -> Type {
     if let Some(tag) = tag.iter().find(|t| t.k.eq("leisure")) {
         if tag.v.eq("park") {
             return Type::Park;
         }
-    } else if let Some(_) = tag.iter().find(|t| t.k.eq("building")) {
+    } else if tag.iter().any(|t| t.k.eq("building")) {
         return Type::Building;
     } else if let Some(tag) = tag.iter().find(|t| t.k.eq("natural")) {
         if tag.v.eq("water") {
             return Type::Water;
         }
-    } else if let Some(_) = tag.iter().find(|t| t.k.eq("waterway")) {
+    } else if tag.iter().any(|t| t.k.eq("waterway")) {
         return Type::WaterRiver;
     };
     Type::Generic
+}
+
+pub fn set_context_for_type(way_type: &Type, context: &Context) {
+    context.set_line_width(1f64);
+    match *way_type {
+        Type::Water | Type::WaterRiver => {
+            context.set_source_rgb(0.286, 0.402, 0.510);
+            context.set_line_width(3f64);
+        }
+        Type::Park => {
+            context.set_source_rgb(0.442, 0.640, 0.551);
+        }
+        Type::Building => {
+            context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
+        }
+        Type::Generic => {
+            context.set_source_rgb(0.5, 0.5, 0.5);
+        }
+    }
 }

@@ -10,7 +10,7 @@ use cairo::{Context, ImageSurface};
 use env_logger::Env;
 use log::info;
 use osm_tiles::{
-    utils::{convert_to_tile, extract_loops_to_render},
+    utils::{convert_to_tile, extract_loops_to_render, set_context_for_type},
     NodeToTile, Osm, Type, Way, TILE_SIZE,
 };
 
@@ -130,20 +130,7 @@ async fn main() {
 
         loops.iter().for_each(|ordered_nodes| {
             let way_type = &ordered_nodes.member_type;
-            match way_type {
-                Type::Water => {
-                    context.set_source_rgba(0.5, 5.0, 1.0, 0.2);
-                }
-                Type::Park => {
-                    context.set_source_rgba(0.5, 1.0, 0.5, 0.2);
-                }
-                Type::Building => {
-                    context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
-                }
-                Type::Generic => {
-                    context.set_source_rgb(0.5, 0.5, 0.5);
-                }
-            }
+            set_context_for_type(way_type, &context);
 
             ordered_nodes
                 .memeber_loop

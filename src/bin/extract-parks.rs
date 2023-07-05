@@ -25,7 +25,7 @@ fn main() {
         .map(|nd| nd.reference)
         .collect();
 
-    let mut filtered_nodes = osm.node.clone();
+    let mut filtered_nodes = osm.node;
     filtered_nodes.retain(|node| nodes_to_filder.contains(&node.id));
 
     let filtered_osm = Osm {
