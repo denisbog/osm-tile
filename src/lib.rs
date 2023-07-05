@@ -76,6 +76,7 @@ pub struct Osm {
 #[derive(PartialEq, Eq, Hash)]
 pub enum Type {
     Park,
+    Forest,
     Building,
     Generic,
     Water,

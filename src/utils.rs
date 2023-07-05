@@ -203,16 +203,14 @@ pub fn check_way_type(way: &Way) -> Type {
 }
 
 fn check_tag_type(tag: &[Tag]) -> Type {
-    if let Some(tag) = tag.iter().find(|t| t.k.eq("leisure")) {
-        if tag.v.eq("park") {
-            return Type::Park;
-        }
+    if tag.iter().any(|t| t.k.eq("leisure") && t.v.eq("park")) {
+        return Type::Park;
+    } else if tag.iter().any(|t| t.k.eq("landuse") && t.v.eq("forest")) {
+        return Type::Forest;
     } else if tag.iter().any(|t| t.k.eq("building")) {
         return Type::Building;
-    } else if let Some(tag) = tag.iter().find(|t| t.k.eq("natural")) {
-        if tag.v.eq("water") {
-            return Type::Water;
-        }
+    } else if tag.iter().any(|t| t.k.eq("natural") && t.v.eq("water")) {
+        return Type::Water;
     } else if tag.iter().any(|t| t.k.eq("waterway")) {
         return Type::WaterRiver;
     };
@@ -228,6 +226,9 @@ pub fn set_context_for_type(way_type: &Type, context: &Context) {
         }
         Type::Park => {
             context.set_source_rgb(0.442, 0.640, 0.551);
+        }
+        Type::Forest => {
+            context.set_source_rgb(0.269, 0.480, 0.385);
         }
         Type::Building => {
             context.set_source_rgba(0.5, 0.5, 0.5, 0.2);

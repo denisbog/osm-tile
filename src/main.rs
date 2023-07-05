@@ -291,6 +291,7 @@ fn draw_to_memory(
     context.set_line_width(1f64);
 
     let render_order = [
+        Type::Forest,
         Type::Park,
         Type::WaterRiver,
         Type::Water,
@@ -368,7 +369,7 @@ fn render_relation(
                 context.line_to(x, y);
             });
 
-        if let Type::Park | Type::Building | Type::Water = way_type {
+        if let Type::Forest | Type::Park | Type::Building | Type::Water = way_type {
             context.fill().unwrap();
 
             if let Type::Building = way_type {
@@ -387,7 +388,7 @@ fn render_relation(
                     }
                 }
             }
-        } else if let Type::Park | Type::Water = relation_type {
+        } else if let Type::Forest | Type::Park | Type::Water = relation_type {
             context.fill().unwrap();
         }
         context.stroke().unwrap();
@@ -418,7 +419,7 @@ fn render_way(
             context.line_to(x, y);
         });
 
-    if let Type::Park | Type::Building | Type::Water = way_type {
+    if let Type::Forest | Type::Park | Type::Building | Type::Water = way_type {
         if let Type::Building = way_type {
             if z > 16 {
                 render_building_number(
