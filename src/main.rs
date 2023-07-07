@@ -139,7 +139,7 @@ fn load_binary_osm() -> Osm {
     from_reader(BufReader::new(File::open("osm.bin").unwrap())).unwrap()
 }
 
-async fn render_tile_inner(z: i32, x: i32, y: i32, _osm: Arc<Osm>, index: &Index) -> Vec<u8> {
+async fn render_tile_inner(z: i32, x: i32, y: i32, index: &Index) -> Vec<u8> {
     let filtered_relations = if let Some(inner) = index.relations_to_tile.get(&x) {
         if let Some(inner) = inner.get(&y) {
             inner.iter().fold(
@@ -298,14 +298,13 @@ impl TileCache {
 async fn render_tile_cache(
     Path((z, x, y)): Path<(i32, i32, i32)>,
     Extension(tile_cache): Extension<Arc<Mutex<TileCache>>>,
-    Extension(osm): Extension<Arc<Osm>>,
 ) -> impl axum::response::IntoResponse {
     let new_path = format!("./cached/{}/{}/{}.png", z, x, y);
     let cached = PathBuf::from(&new_path);
     let response = if !cached.is_file() {
         let index = tile_cache.lock().await.get_cache(z as u8);
 
-        let rendered_image = render_tile_inner(z, x, y, osm.clone(), index.as_ref()).await;
+        let rendered_image = render_tile_inner(z, x, y, index.as_ref()).await;
 
         let last_index = new_path.rfind('/').unwrap();
         tokio::fs::create_dir_all(&new_path[..last_index])
@@ -570,13 +569,15 @@ mod test {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use crate::{build_index_for_zoom, load_binary_osm, render_tile_inner};
+    use crate::{load_binary_osm, render_tile_inner, TileCache};
 
     #[tokio::test]
     async fn render_tile_test() {
         let osm = Arc::new(load_binary_osm());
-        let index = build_index_for_zoom(osm.clone(), 13);
-        let data = render_tile_inner(13, 4753, 2881, osm, &index).await;
+
+        let mut tile_cache = TileCache::new_no_default(osm.clone());
+        let index = tile_cache.get_cache(13);
+        let data = render_tile_inner(13, 4753, 2881, &index).await;
 
         tokio::fs::write(&PathBuf::from("test-tile.png"), &data)
             .await
