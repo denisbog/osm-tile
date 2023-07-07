@@ -275,20 +275,23 @@ impl TileCache {
             id_to_ways,
         }
     }
-    fn get_cache(&mut self, zoom: u8) -> &Index {
-        let cache = self.cache.entry(zoom).or_insert_with_key(|&zoom| {
-            Arc::new(build_index_for_zoom(
-                self.nodes_to_tile.clone(),
-                self.id_to_relations.clone(),
-                self.id_to_ways.clone(),
-                self.ways.clone(),
-                self.relations.clone(),
-                self.relation_to_type.clone(),
-                self.way_to_type.clone(),
-                zoom,
-            ))
-        });
-        cache
+
+    fn get_cache(&mut self, zoom: u8) -> Arc<Index> {
+        self.cache
+            .entry(zoom)
+            .or_insert_with_key(|&zoom| {
+                Arc::new(build_index_for_zoom(
+                    self.nodes_to_tile.clone(),
+                    self.id_to_relations.clone(),
+                    self.id_to_ways.clone(),
+                    self.ways.clone(),
+                    self.relations.clone(),
+                    self.relation_to_type.clone(),
+                    self.way_to_type.clone(),
+                    zoom,
+                ))
+            })
+            .clone()
     }
 }
 
@@ -300,10 +303,9 @@ async fn render_tile_cache(
     let new_path = format!("./cached/{}/{}/{}.png", z, x, y);
     let cached = PathBuf::from(&new_path);
     let response = if !cached.is_file() {
-        let mut lock = tile_cache.lock().await;
-        let temp = lock.get_cache(z as u8);
+        let index = tile_cache.lock().await.get_cache(z as u8);
 
-        let rendered_image = render_tile_inner(z, x, y, osm.clone(), temp).await;
+        let rendered_image = render_tile_inner(z, x, y, osm.clone(), index.as_ref()).await;
 
         let last_index = new_path.rfind('/').unwrap();
         tokio::fs::create_dir_all(&new_path[..last_index])
