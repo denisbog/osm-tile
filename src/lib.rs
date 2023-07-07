@@ -73,7 +73,7 @@ pub struct Osm {
     pub way: Vec<Arc<Way>>,
     pub node: Vec<Arc<Node>>,
 }
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub enum Type {
     Park,
     Forest,

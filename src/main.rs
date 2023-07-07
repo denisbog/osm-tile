@@ -29,29 +29,40 @@ use tower_http::{
     services::ServeDir,
 };
 
+fn nodes_to_tile(osm: &Osm) -> NodeToTile {
+    osm.node
+        .iter()
+        .fold(HashMap::<u64, (f64, f64)>::new(), |mut acc, item| {
+            acc.insert(item.id, convert_to_tile(item.lat, item.lon));
+            acc
+        })
+}
+
 struct Index {
     relations_to_tile: RelationToTile,
     ways_to_tile: WayToTile,
-    node_to_tile_zoom_coordinates: NodeToTile,
-    id_to_ways: HashMap<u64, Arc<Way>>,
+    node_to_tile_zoom_coordinates: Arc<NodeToTile>,
+    id_to_relations: Arc<HashMap<u64, Arc<Relation>>>,
+    id_to_ways: Arc<HashMap<u64, Arc<Way>>>,
+    relation_to_type: Arc<HashMap<u64, Type>>,
+    way_to_type: Arc<HashMap<u64, Type>>,
 }
-fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
+fn build_index_for_zoom(
+    osm: Arc<Osm>,
+    nodes_to_tile: Arc<NodeToTile>,
+    relation_to_type: Arc<HashMap<u64, Type>>,
+    way_to_type: Arc<HashMap<u64, Type>>,
+    zoom: u8,
+) -> Index {
     info!("build new cache for zoom {}", zoom);
-    let nodes_to_tile: NodeToTile =
-        osm.node
-            .iter()
-            .fold(HashMap::<u64, (f64, f64)>::new(), |mut acc, item| {
-                acc.insert(item.id, convert_to_tile(item.lat, item.lon));
-                acc
-            });
 
     let dimension_in_pixels_for_zoom = f64::from(TILE_SIZE * (1 << zoom));
 
     let node_to_tile_zoom_coordinates: NodeToTile = nodes_to_tile
-        .into_iter()
+        .iter()
         .map(|(id, (x, y))| {
             (
-                id,
+                id.clone(),
                 (
                     x * dimension_in_pixels_for_zoom,
                     y * dimension_in_pixels_for_zoom,
@@ -62,13 +73,21 @@ fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
 
     let sorrund_tiles_window = [1, 1, 0, 1, -1, -1, 0, -1, 1];
 
-    let id_to_ways = osm
-        .way
-        .iter()
-        .fold(HashMap::<u64, Arc<Way>>::new(), |mut acc, way| {
+    let id_to_ways = Arc::new(osm.way.iter().fold(
+        HashMap::<u64, Arc<Way>>::new(),
+        |mut acc, way| {
             acc.insert(way.id, way.clone());
             acc
-        });
+        },
+    ));
+
+    let id_to_relations = Arc::new(osm.relation.iter().fold(
+        HashMap::<u64, Arc<Relation>>::new(),
+        |mut acc, relation| {
+            acc.insert(relation.id, relation.clone());
+            acc
+        },
+    ));
 
     let relations_to_tile = osm.relation.iter().fold(
         HashMap::<i32, HashMap<i32, HashSet<u64>>>::new(),
@@ -146,8 +165,11 @@ fn build_index_for_zoom(osm: Arc<Osm>, zoom: u8) -> Index {
     Index {
         relations_to_tile,
         ways_to_tile,
-        node_to_tile_zoom_coordinates,
+        node_to_tile_zoom_coordinates: Arc::new(node_to_tile_zoom_coordinates),
+        id_to_relations,
         id_to_ways,
+        relation_to_type,
+        way_to_type,
     }
 }
 
@@ -155,63 +177,91 @@ fn load_binary_osm() -> Osm {
     from_reader(BufReader::new(File::open("osm.bin").unwrap())).unwrap()
 }
 
-async fn render_tile_inner(z: i32, x: i32, y: i32, osm: Arc<Osm>, index: &Index) -> Vec<u8> {
+async fn render_tile_inner(z: i32, x: i32, y: i32, _osm: Arc<Osm>, index: &Index) -> Vec<u8> {
     let filtered_relations = if let Some(inner) = index.relations_to_tile.get(&x) {
         if let Some(inner) = inner.get(&y) {
-            osm.relation
-                .iter()
-                .cloned()
-                .filter(|relation| inner.contains(&relation.id))
-                .collect()
+            inner.iter().fold(
+                HashMap::<Type, Vec<Arc<Relation>>>::new(),
+                |mut acc, relation_id| {
+                    let relation_type = index.relation_to_type.get(&relation_id).unwrap();
+                    let relation = index.id_to_relations.get(&relation_id).unwrap();
+                    acc.entry(relation_type.clone())
+                        .or_insert(Vec::<Arc<Relation>>::new())
+                        .push(relation.clone());
+                    acc
+                },
+            )
         } else {
-            Vec::new()
+            HashMap::new()
         }
     } else {
-        Vec::new()
+        HashMap::new()
     };
 
     let filtered_ways = if let Some(inner) = index.ways_to_tile.get(&x) {
         if let Some(inner) = inner.get(&y) {
             inner
                 .iter()
-                .flat_map(|inner| index.id_to_ways.get(inner))
-                .cloned()
-                .collect()
+                .fold(HashMap::<Type, Vec<Arc<Way>>>::new(), |mut acc, way_id| {
+                    let way_type = index.way_to_type.get(&way_id).unwrap();
+                    let way = index.id_to_ways.get(&way_id).unwrap();
+
+                    acc.entry(way_type.clone())
+                        .or_insert(Vec::<Arc<Way>>::new())
+                        .push(way.clone());
+                    acc
+                })
         } else {
-            Vec::new()
+            HashMap::new()
         }
     } else {
-        Vec::new()
+        HashMap::new()
     };
 
     draw_to_memory(
         z,
-        &index.node_to_tile_zoom_coordinates,
+        index.node_to_tile_zoom_coordinates.clone(),
         x as f64 * TILE_SIZE as f64,
         y as f64 * TILE_SIZE as f64,
-        &filtered_relations,
-        &filtered_ways,
-        &index.id_to_ways,
+        Arc::new(filtered_relations),
+        Arc::new(filtered_ways),
+        index.id_to_ways.clone(),
     )
 }
 
 struct TileCache {
     osm: Arc<Osm>,
     cache: HashMap<u8, Arc<Index>>,
+    nodes_to_tile: Arc<NodeToTile>,
+    relation_to_type: Arc<HashMap<u64, Type>>,
+    way_to_type: Arc<HashMap<u64, Type>>,
 }
 
 impl TileCache {
-    fn new(osm: Arc<Osm>) -> Self {
+    fn new_no_default(
+        osm: Arc<Osm>,
+        nodes_to_tile: Arc<NodeToTile>,
+        relation_to_type: Arc<HashMap<u64, Type>>,
+        way_to_type: Arc<HashMap<u64, Type>>,
+    ) -> Self {
         TileCache {
             osm,
             cache: HashMap::new(),
+            nodes_to_tile,
+            relation_to_type,
+            way_to_type,
         }
     }
     fn get_cache(&mut self, zoom: u8) -> &Index {
-        let cache = self
-            .cache
-            .entry(zoom)
-            .or_insert_with_key(|&zoom| Arc::new(build_index_for_zoom(self.osm.clone(), zoom)));
+        let cache = self.cache.entry(zoom).or_insert_with_key(|&zoom| {
+            Arc::new(build_index_for_zoom(
+                self.osm.clone(),
+                self.nodes_to_tile.clone(),
+                self.relation_to_type.clone(),
+                self.way_to_type.clone(),
+                zoom,
+            ))
+        });
         cache
     }
 }
@@ -251,32 +301,13 @@ async fn render_tile_cache(
 
 fn draw_to_memory(
     z: i32,
-    mapped_nodes: &HashMap<u64, (f64, f64)>,
+    mapped_nodes: Arc<HashMap<u64, (f64, f64)>>,
     min_x: f64,
     min_y: f64,
-    relations: &[Arc<Relation>],
-    ways: &[Arc<Way>],
-    id_to_ways: &HashMap<u64, Arc<Way>>,
+    relations_for_type: Arc<HashMap<Type, Vec<Arc<Relation>>>>,
+    ways_for_type: Arc<HashMap<Type, Vec<Arc<Way>>>>,
+    id_to_ways: Arc<HashMap<u64, Arc<Way>>>,
 ) -> Vec<u8> {
-    let type_of_relations = relations.iter().fold(
-        HashMap::<Type, Vec<Arc<Relation>>>::new(),
-        |mut acc, relation| {
-            acc.entry(check_relation_type(relation))
-                .or_insert(Vec::<Arc<Relation>>::new())
-                .push(relation.clone());
-            acc
-        },
-    );
-
-    let type_of_ways = ways
-        .iter()
-        .fold(HashMap::<Type, Vec<Arc<Way>>>::new(), |mut acc, way| {
-            acc.entry(check_way_type(way))
-                .or_insert(Vec::<Arc<Way>>::new())
-                .push(way.clone());
-            acc
-        });
-
     let surface =
         ImageSurface::create(cairo::Format::Rgb24, TILE_SIZE as i32, TILE_SIZE as i32).unwrap();
     let context = Context::new(&surface).unwrap();
@@ -300,24 +331,33 @@ fn draw_to_memory(
     ];
 
     for filter_type in &render_order {
-        type_of_ways
+        ways_for_type
             .get(filter_type)
             .unwrap_or(&Vec::<Arc<Way>>::new())
             .iter()
             .for_each(|way| {
-                render_way(way, &context, mapped_nodes, min_x, min_y, z);
+                render_way(
+                    way,
+                    filter_type,
+                    &context,
+                    mapped_nodes.as_ref(),
+                    min_x,
+                    min_y,
+                    z,
+                );
             });
 
-        type_of_relations
+        relations_for_type
             .get(filter_type)
             .unwrap_or(&Vec::<Arc<Relation>>::new())
             .iter()
             .for_each(|relation| {
                 render_relation(
-                    relation,
+                    relation.clone(),
+                    filter_type,
                     &context,
-                    id_to_ways,
-                    mapped_nodes,
+                    id_to_ways.clone(),
+                    mapped_nodes.clone(),
                     min_x,
                     min_y,
                     z,
@@ -337,19 +377,18 @@ fn draw_to_memory(
 }
 
 fn render_relation(
-    relation: &Arc<Relation>,
+    relation: Arc<Relation>,
+    relation_type: &Type,
     context: &Context,
-    id_to_ways: &HashMap<u64, Arc<Way>>,
-    mapped_nodes: &HashMap<u64, (f64, f64)>,
+    id_to_ways: Arc<HashMap<u64, Arc<Way>>>,
+    mapped_nodes: Arc<HashMap<u64, (f64, f64)>>,
     min_x: f64,
     min_y: f64,
     z: i32,
 ) {
-    let relation_type = check_relation_type(relation);
-
     set_context_for_type(&relation_type, context);
 
-    let loops = extract_loops_to_render(relation.as_ref(), id_to_ways);
+    let loops = extract_loops_to_render(relation.as_ref(), id_to_ways.as_ref());
     loops.iter().for_each(|ordered_nodes| {
         let way_type = &ordered_nodes.member_type;
 
@@ -380,7 +419,7 @@ fn render_relation(
                         render_building_number(
                             way,
                             &ordered_nodes.memeber_loop,
-                            mapped_nodes,
+                            mapped_nodes.as_ref(),
                             min_x,
                             min_y,
                             context,
@@ -398,13 +437,13 @@ fn render_relation(
 
 fn render_way(
     way: &Arc<Way>,
+    way_type: &Type,
     context: &Context,
     mapped_nodes: &HashMap<u64, (f64, f64)>,
     min_x: f64,
     min_y: f64,
     z: i32,
 ) {
-    let way_type = check_way_type(way);
     set_context_for_type(&way_type, context);
 
     way.nd
@@ -483,11 +522,29 @@ async fn main() {
         .allow_headers(Any)
         .allow_origin(Any);
 
+    let relation_to_type =
+        osm.relation
+            .iter()
+            .fold(HashMap::<u64, Type>::new(), |mut acc, relation| {
+                acc.insert(relation.id, check_relation_type(relation));
+                acc
+            });
+    let way_to_type = osm
+        .way
+        .iter()
+        .fold(HashMap::<u64, Type>::new(), |mut acc, way| {
+            acc.insert(way.id, check_way_type(way));
+            acc
+        });
+
     let app = Router::new()
         .nest_service("/", ServeDir::new("../solid-leaflet-reprex/dist"))
         .route("/map/:z/:x/:y", get(render_tile_cache))
-        .layer(Extension(Arc::new(Mutex::new(TileCache::new(
+        .layer(Extension(Arc::new(Mutex::new(TileCache::new_no_default(
             filtered_osm.clone(),
+            Arc::new(nodes_to_tile(filtered_osm.as_ref())),
+            Arc::new(relation_to_type),
+            Arc::new(way_to_type),
         )))))
         .layer(Extension(filtered_osm.clone()))
         .layer(cors);
