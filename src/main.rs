@@ -7,6 +7,7 @@ use axum::{
 use cairo::{Context, ImageSurface};
 use ciborium::from_reader;
 use env_logger::Env;
+use geo::Polygon;
 use log::info;
 use osm_tiles::{
     utils::{
@@ -498,23 +499,19 @@ fn render_building_number(
 ) {
     if let Some(tag) = &way.tag {
         if let Some(tag) = &tag.iter().filter(|tag| tag.k.eq("addr:housenumber")).last() {
-            if let Some((x, y)) = ordered_nodes
+            let points: Vec<(f64, f64)> = ordered_nodes
                 .iter()
                 .flat_map(|node| mapped_nodes.get(node))
-                .map(|(x, y)| {
-                    let x = x - min_x;
-                    let y = y - min_y;
-                    (x, y)
+                .cloned()
+                .collect();
+
+            let poly = Polygon::new(points.into(), vec![]);
+            polylabel::polylabel(&poly, &0.01)
+                .map(|item| {
+                    context.move_to(item.0.x - min_x, item.0.y - min_y);
+                    context.show_text(&tag.v).unwrap();
                 })
-                .reduce(|(x, y), (x1, y1)| (x + x1, y + y1))
-                .map(|(x, y)| {
-                    let points = ordered_nodes.len() as f64;
-                    (x / points, y / points)
-                })
-            {
-                context.move_to(x, y);
-            };
-            context.show_text(&tag.v).unwrap();
+                .unwrap();
         }
     }
 }
