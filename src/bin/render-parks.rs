@@ -10,8 +10,10 @@ use cairo::{Context, ImageSurface};
 use env_logger::Env;
 use log::info;
 use osm_tiles::{
-    utils::{convert_to_tile, extract_loops_to_render, set_context_for_type},
-    NodeToTile, Osm, Type, Way, TILE_SIZE,
+    utils::{
+        convert_to_tile, end_context_for_way_type, extract_loops_to_render, set_context_for_type,
+    },
+    NodeToTile, Osm, Way, TILE_SIZE,
 };
 
 const PADDING: f64 = 100f64;
@@ -107,7 +109,6 @@ async fn main() {
     context.set_line_join(cairo::LineJoin::Round);
 
     context.set_source_rgb(0.5, 0.5, 0.5);
-    context.set_line_width(1f64);
 
     info!("init nodes to order");
     osm.relation.iter().for_each(|relation| {
@@ -144,13 +145,8 @@ async fn main() {
                 .for_each(|(x, y)| {
                     context.line_to(x, y);
                 });
-
-            if let Type::Park | Type::Building = way_type {
-                context.fill().unwrap();
-            }
-            context.stroke().unwrap();
+            end_context_for_way_type(way_type, &context);
         });
-
         context.stroke().unwrap();
     });
 

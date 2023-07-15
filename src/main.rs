@@ -12,7 +12,8 @@ use log::info;
 use osm_tiles::{
     utils::{
         check_relation_type, check_way_type, convert_to_int_tile, convert_to_tile,
-        extract_loops_to_render, set_context_for_type,
+        end_context_for_relation_type, end_context_for_way_type, extract_loops_to_render,
+        set_context_for_type,
     },
     NodeToTile, Osm, Relation, RelationToTile, Type, Way, WayToTile, TILE_SIZE,
 };
@@ -421,27 +422,23 @@ fn render_relation(
                 context.line_to(x, y);
             });
 
-        if let Type::Forest | Type::Park | Type::Building | Type::Water = way_type {
-            context.fill().unwrap();
-
-            if let Type::Building = way_type {
-                if z > 16 {
-                    //render bulding address
-                    if let Some(way_id) = ordered_nodes.way_id {
-                        let way = id_to_ways.get(&way_id).unwrap();
-                        render_building_number(
-                            way,
-                            &ordered_nodes.memeber_loop,
-                            mapped_nodes,
-                            min_x,
-                            min_y,
-                            context,
-                        );
-                    }
+        end_context_for_way_type(way_type, context);
+        end_context_for_relation_type(relation_type, context);
+        if let Type::Building = way_type {
+            if z > 16 {
+                //render bulding address
+                if let Some(way_id) = ordered_nodes.way_id {
+                    let way = id_to_ways.get(&way_id).unwrap();
+                    render_building_number(
+                        way,
+                        &ordered_nodes.memeber_loop,
+                        mapped_nodes,
+                        min_x,
+                        min_y,
+                        context,
+                    );
                 }
             }
-        } else if let Type::Forest | Type::Park | Type::Water = relation_type {
-            context.fill().unwrap();
         }
         context.stroke().unwrap();
     });
@@ -491,7 +488,7 @@ fn render_way(
 
 fn render_building_number(
     way: &Way,
-    ordered_nodes: &Vec<u64>,
+    ordered_nodes: &[u64],
     mapped_nodes: &HashMap<u64, (f64, f64)>,
     min_x: f64,
     min_y: f64,

@@ -231,10 +231,40 @@ pub fn set_context_for_type(way_type: &Type, context: &Context) {
             context.set_source_rgb(0.269, 0.480, 0.385);
         }
         Type::Building => {
+            context.set_line_width(1f64);
             context.set_source_rgba(0.5, 0.5, 0.5, 0.2);
         }
         Type::Generic => {
             context.set_source_rgb(0.5, 0.5, 0.5);
         }
+    }
+}
+
+pub fn end_context_for_way_type(way_type: &Type, context: &Context) {
+    end_context_for_type(way_type, context, false);
+}
+
+pub fn end_context_for_relation_type(relation_type: &Type, context: &Context) {
+    end_context_for_type(relation_type, context, true);
+}
+
+fn end_context_for_type(way_type: &Type, context: &Context, is_relation: bool) {
+    match *way_type {
+        Type::Water => {
+            context.fill().unwrap();
+        }
+        Type::WaterRiver => {}
+        Type::Park => {
+            context.fill().unwrap();
+        }
+        Type::Forest => {
+            context.fill().unwrap();
+        }
+        Type::Building => {
+            if !is_relation {
+                context.fill().unwrap();
+            }
+        }
+        Type::Generic => {}
     }
 }
