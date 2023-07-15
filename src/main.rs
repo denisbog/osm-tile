@@ -504,14 +504,10 @@ fn render_building_number(
                 .flat_map(|node| mapped_nodes.get(node))
                 .cloned()
                 .collect();
-
             let poly = Polygon::new(points.into(), vec![]);
-            polylabel::polylabel(&poly, &0.01)
-                .map(|item| {
-                    context.move_to(item.0.x - min_x, item.0.y - min_y);
-                    context.show_text(&tag.v).unwrap();
-                })
-                .unwrap();
+            let label_position = polylabel::polylabel(&poly, &0.1).unwrap().0;
+            context.move_to(label_position.x - min_x, label_position.y - min_y);
+            context.show_text(&tag.v).unwrap();
         }
     }
 }
