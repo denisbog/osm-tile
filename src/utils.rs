@@ -28,8 +28,7 @@ pub fn filter_relations(
 ) -> Vec<Arc<Relation>> {
     osm.relation
         .iter()
-        .cloned()
-        .filter(|relation| {
+        .filter(|&relation| {
             if let Some(tag) = &relation.tag {
                 tag.iter()
                     .filter(|item| {
@@ -42,6 +41,7 @@ pub fn filter_relations(
                 false
             }
         })
+        .cloned()
         .collect()
 }
 
@@ -62,8 +62,8 @@ pub fn filter_ways_from_relations(osm: &Osm, relations: &[Arc<Relation>]) -> Vec
 
     osm.way
         .iter()
-        .cloned()
         .filter(|way| ways_to_filter.contains(&way.id))
+        .cloned()
         .collect()
 }
 
@@ -100,11 +100,11 @@ pub fn extract_loops_to_render(
         .iter()
         .fold(HashMap::<u64, HashSet<u64>>::new(), |mut acc, way| {
             acc.entry(way.nd.first().unwrap().reference)
-                .or_insert(HashSet::<u64>::new())
+                .or_default()
                 .insert(way.id);
 
             acc.entry(way.nd.last().unwrap().reference)
-                .or_insert(HashSet::<u64>::new())
+                .or_default()
                 .insert(way.id);
             acc
         });

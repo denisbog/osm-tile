@@ -21,7 +21,6 @@ use std::{
     collections::{HashMap, HashSet},
     fs::File,
     io::{BufReader, BufWriter},
-    net::SocketAddr,
     path::PathBuf,
     sync::Arc,
 };
@@ -75,16 +74,16 @@ fn build_index_for_zoom(
                     let tile = node_to_tile_zoom_coordinates.get(&node.reference).unwrap();
                     let tile = convert_to_int_tile(tile.0, tile.1);
                     acc.entry(tile.0)
-                        .or_insert(HashMap::new())
+                        .or_default()
                         .entry(tile.1)
-                        .or_insert(HashSet::new())
+                        .or_default()
                         .insert(relation.id);
                     if zoom > 15 {
                         sorrund_tiles_window.windows(2).for_each(|sliding_window| {
                             acc.entry(tile.0 + sliding_window[0])
-                                .or_insert(HashMap::new())
+                                .or_default()
                                 .entry(tile.1 + sliding_window[1])
-                                .or_insert(HashSet::new())
+                                .or_default()
                                 .insert(relation.id);
                         })
                     }
@@ -100,16 +99,16 @@ fn build_index_for_zoom(
                 let tile = node_to_tile_zoom_coordinates.get(&node.reference).unwrap();
                 let tile = convert_to_int_tile(tile.0, tile.1);
                 acc.entry(tile.0)
-                    .or_insert(HashMap::new())
+                    .or_default()
                     .entry(tile.1)
-                    .or_insert(HashSet::new())
+                    .or_default()
                     .insert(way.id);
                 if zoom > 15 {
                     sorrund_tiles_window.windows(2).for_each(|sliding_window| {
                         acc.entry(tile.0 + sliding_window[0])
-                            .or_insert(HashMap::new())
+                            .or_default()
                             .entry(tile.1 + sliding_window[1])
-                            .or_insert(HashSet::new())
+                            .or_default()
                             .insert(way.id);
                     })
                 }
@@ -139,7 +138,7 @@ async fn render_tile_inner(z: i32, x: i32, y: i32, index: &Index) -> Vec<u8> {
                     let relation_type = index.state.relation_to_type.get(relation_id).unwrap();
                     let relation = index.state.id_to_relations.get(relation_id).unwrap();
                     acc.entry(relation_type.clone())
-                        .or_insert(Vec::<Arc<Relation>>::new())
+                        .or_default()
                         .push(relation.clone());
                     acc
                 },
@@ -159,9 +158,7 @@ async fn render_tile_inner(z: i32, x: i32, y: i32, index: &Index) -> Vec<u8> {
                     let way_type = index.state.way_to_type.get(way_id).unwrap();
                     let way = index.state.id_to_ways.get(way_id).unwrap();
 
-                    acc.entry(way_type.clone())
-                        .or_insert(Vec::<Arc<Way>>::new())
-                        .push(way.clone());
+                    acc.entry(way_type.clone()).or_default().push(way.clone());
                     acc
                 })
         } else {
@@ -258,8 +255,8 @@ impl TileCache {
         let ways: Vec<Arc<Way>> = osm
             .way
             .iter()
-            .cloned()
             .filter(|way| !ways_from_relations.contains(&way.id))
+            .cloned()
             .collect();
 
         TileCache {
@@ -533,10 +530,12 @@ async fn main() {
         .layer(Extension(filtered_osm.clone()))
         .layer(cors);
 
-    axum::Server::bind(&SocketAddr::from(([0, 0, 0, 0], 4000)))
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    axum::serve(
+        tokio::net::TcpListener::bind("0.0.0.0:4000").await.unwrap(),
+        app,
+    )
+    .await
+    .unwrap();
 }
 
 #[cfg(test)]
